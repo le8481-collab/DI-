@@ -10,10 +10,7 @@
   <script src="https://cdn.tailwindcss.com"></script>
   <link rel="preconnect" href="https://fonts.googleapis.com"/>
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&display=swap" rel="stylesheet"/>
-  <style>
-    * { -webkit-tap-highlight-color: transparent; }
-    body { margin: 0; }
-  </style>
+  <style>* { -webkit-tap-highlight-color: transparent; } body { margin: 0; }</style>
 </head>
 <body>
   <div id="root"></div>
@@ -971,25 +968,8 @@ function App() {
     });
   }, []);
 
-  // Loading / error screen
-  if (!loaded) return (
-    <div className="min-h-screen bg-gray-100 flex items-center justify-center" style={{fontFamily:"'Noto Sans TC','PingFang TC',sans-serif"}}>
-      <div className="text-center">
-        <div className="w-8 h-8 border-2 border-orange-500 border-t-transparent rounded-full animate-spin mx-auto mb-3"/>
-        <p className="text-gray-500 text-sm">連線中…</p>
-      </div>
-    </div>
-  );
-
-  if (fbError) return (
-    <div className="min-h-screen bg-gray-100 flex items-center justify-center p-6" style={{fontFamily:"'Noto Sans TC','PingFang TC',sans-serif"}}>
-      <div className="bg-white rounded-2xl p-6 text-center shadow-sm max-w-xs">
-        <p className="text-red-500 font-bold mb-2">連線失敗</p>
-        <p className="text-gray-500 text-sm">無法連接 Firebase，請確認網路並重新整理頁面</p>
-        <button onClick={() => window.location.reload()} className="mt-4 px-6 py-2 bg-orange-500 text-white rounded-xl text-sm font-bold">重新整理</button>
-      </div>
-    </div>
-  );
+  // Loading / error screen — rendered at end, hooks all declared first
+  // (early return moved below all hooks)
 
   // Auth
   const [isAdmin, setIsAdmin] = useState(false);
@@ -1194,6 +1174,28 @@ function App() {
         <button onClick={() => setShowPayment(false)} className="w-full mt-4 py-3 bg-orange-500 text-white rounded-xl font-bold hover:bg-orange-600 transition-colors">{t.paymentClose}</button>
       </div>
     </Modal>
+  );
+
+  // ──────────────────────────────────────────
+  // EARLY RETURNS (after all hooks declared)
+  // ──────────────────────────────────────────
+  if (!loaded) return (
+    <div className="min-h-screen bg-gray-100 flex items-center justify-center" style={{fontFamily:"'Noto Sans TC','PingFang TC',sans-serif"}}>
+      <div className="text-center">
+        <div className="w-8 h-8 border-2 border-orange-500 border-t-transparent rounded-full animate-spin mx-auto mb-3"/>
+        <p className="text-gray-500 text-sm">連線中…</p>
+      </div>
+    </div>
+  );
+
+  if (fbError) return (
+    <div className="min-h-screen bg-gray-100 flex items-center justify-center p-6" style={{fontFamily:"'Noto Sans TC','PingFang TC',sans-serif"}}>
+      <div className="bg-white rounded-2xl p-6 text-center shadow-sm max-w-xs">
+        <p className="text-red-500 font-bold mb-2">連線失敗</p>
+        <p className="text-gray-500 text-sm">無法連接 Firebase，請確認網路並重新整理頁面</p>
+        <button onClick={() => window.location.reload()} className="mt-4 px-6 py-2 bg-orange-500 text-white rounded-xl text-sm font-bold">重新整理</button>
+      </div>
+    </div>
   );
 
   // ──────────────────────────────────────────
