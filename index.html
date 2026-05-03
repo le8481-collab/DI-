@@ -1,0 +1,1743 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>午餐點餐系統</title>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&display=swap" rel="stylesheet"/>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel" data-presets="react">
+const { useState, useEffect, useCallback, useMemo } = React;
+
+
+// ─────────────────────────────────────────────
+// FIREBASE — loaded via CDN globals (set up in useEffect)
+// ─────────────────────────────────────────────
+const firebaseConfig = {
+  apiKey: "AIzaSyALuY29s4vbMcMleNStjBTPft8NrACHORE",
+  authDomain: "lunch-order-f928c.firebaseapp.com",
+  projectId: "lunch-order-f928c",
+  storageBucket: "lunch-order-f928c.firebasestorage.app",
+  messagingSenderId: "639831261279",
+  appId: "1:639831261279:web:a55788a35d675e88fa1bea",
+};
+
+// Lazy Firebase loader — injects CDN scripts and resolves when ready
+function loadFirebase() {
+  return new Promise((resolve, reject) => {
+    if (window._fbDb) { resolve(window._fbDb); return; }
+    const loadScript = (src) => new Promise((res, rej) => {
+      const s = document.createElement("script");
+      s.src = src; s.onload = res; s.onerror = rej;
+      document.head.appendChild(s);
+    });
+    Promise.all([
+      loadScript("https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"),
+      loadScript("https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"),
+    ]).then(() => {
+      if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
+      window._fbDb = firebase.firestore();
+      resolve(window._fbDb);
+    }).catch(reject);
+  });
+}
+
+// ─────────────────────────────────────────────
+// TRANSLATIONS
+// ─────────────────────────────────────────────
+const LANGS = {
+  zh: {
+    label: "中文",
+    selectDay: "選擇日期",
+    notSetToday: "今日未排定餐廳",
+    noOrderToday: "本日無代訂餐",
+    waitAdmin: "請等管理員設定排程",
+    deadlinePrefix: "截止",
+    deadlineRemain: "剩",
+    advanceBooking: "預約中",
+    closedToday: "今日點餐已截止 (09:00)",
+    closedDay: "此日點餐已截止",
+    noRestaurant: "尚未排定餐廳",
+    closedTitle: "點餐已截止",
+    closedSub: "截止時間 09:00",
+    yourName: "姓名",
+    namePlaceholder: "請以全名輸入（例：陳小明）",
+    orderItems: "選擇餐點",
+    notePlaceholder: "備註（例：不要香菜）",
+    inquire: "洽詢",
+    yourOrder: "確認點餐",
+    subtotal: "小計",
+    selectFirst: "請先選擇餐點",
+    confirmTitle: "確認送出",
+    confirmBtn: "確認送出",
+    cancelBtn: "取消",
+    paymentTitle: "點餐完成",
+    paymentMsg: "請將餐費交給相關人員，謝謝！",
+    paymentClose: "確定",
+    submit: (n) => `送出點餐 (${n} 樣)`,
+    ordersEmpty: "尚無訂單",
+    adminEntry: "管理員入口",
+    adminLogin: "管理員登入",
+    adminPwPlaceholder: "請輸入密碼",
+    adminPwError: "密碼錯誤",
+    adminLoginBtn: "登入",
+    showPw: "顯示", hidePw: "隱藏",
+    passwordLabel: "密碼",
+    adminTitle: "管理後台",
+    switchMode: "前往點餐頁",
+    logout: "登出",
+    tabSchedule: "餐廳排程",
+    tabRestaurants: "餐廳管理",
+    tabOrders: "訂單總覽",
+    thisWeek: "本週", nextWeek: "下週",
+    noSchedule: "未安排",
+    noOrderLabel: "本日無代訂餐",
+    todayLabel: "今日",
+    dishes: "項",
+    ordersCount: "筆",
+    scheduleSummary: "排程摘要",
+    notArranged: "—",
+    noScheduleYet: "尚無排程",
+    statTitle: "品項統計",
+    total: "合計", orders: "筆",
+    clearDay: "清除此日訂單",
+    confirmClear: (d) => `確定清除 ${d} 的所有訂單？`,
+    addRestaurant: "新增餐廳",
+    editTitle: "編輯餐廳", addTitle: "新增餐廳",
+    nameLabel: "餐廳名稱 *", noteLabel: "備註",
+    colorLabel: "顏色",
+    notePlaceholder2: "電話、公休日等（選填）",
+    menuItems: "菜單", noItems: "尚未新增品項",
+    itemNamePh: "品項名稱", itemPricePh: "價格",
+    addBtn: "新增", saveBtn: "儲存", createBtn: "建立",
+    deleteConfirm: "確定刪除此餐廳？",
+    editBtn: "編輯", deleteBtn: "刪除",
+    today: "今天", tomorrow: "明天",
+    weekdays: ["週一","週二","週三","週四","週五","週六","週日"],
+    weekdaysShort: ["一","二","三","四","五","六","日"],
+    dupNote: (name) => `已更新 ${name} 的訂單`,
+    nameHint: "如需修改訂單，請以同一個姓名重新預訂，將會覆蓋前一筆訂單",
+    nameHintAdmin: "此修改內容將在後台訂單處顯示修改過程",
+    editedLabel: "已修改",
+    editHistory: "修改紀錄",
+    prevOrder: "修改前",
+    bookingFor: (day, date) => `預約 ${day} ${date}`,
+    bookingDeadline: "截止時間為當日 09:00",
+    draftChanged: "排程有未儲存的變更",
+    draftConfirm: "確認套用排程",
+    draftDiscard: "捨棄變更",
+    draftSaved: "排程已套用",
+    cancelOrderItem: "取消今日訂餐",
+    cancelOrderNote: "選擇此項將取消您的訂單",
+    cancelledLabel: "已取消",
+    minDelivery: "最低外送份數",
+    minDeliveryPh: "例：10",
+    deliveryProgress: (cur, min) => `目前 ${cur} 份 / 最低 ${min} 份`,
+    deliveryMet: (min) => `最低外送 ${min} 份已達標`,
+    deliveryShort: (n) => `還差 ${n} 份`,
+    specialNoteLabel: "特殊備註",
+    confirmDeleteOrder: (name) => `確定刪除 ${name} 的訂單？`,
+  },
+  id: {
+    label: "Indonesia",
+    selectDay: "Pilih hari",
+    notSetToday: "Belum ada restoran hari ini",
+    noOrderToday: "Tidak ada pemesanan hari ini",
+    waitAdmin: "Tunggu admin mengatur jadwal",
+    deadlinePrefix: "Batas",
+    deadlineRemain: "Sisa",
+    advanceBooking: "Reservasi",
+    closedToday: "Pemesanan hari ini tutup (09:00)",
+    closedDay: "Pemesanan hari itu sudah tutup",
+    noRestaurant: "Belum ada jadwal restoran",
+    closedTitle: "Pemesanan Ditutup",
+    closedSub: "Batas waktu 09:00",
+    yourName: "Nama",
+    namePlaceholder: "Masukkan nama lengkap (contoh: Budi Santoso)",
+    orderItems: "Pilih menu",
+    notePlaceholder: "Catatan (tanpa bawang, dll)",
+    inquire: "Tanya",
+    yourOrder: "Konfirmasi Pesanan",
+    subtotal: "Subtotal",
+    selectFirst: "Pilih menu dulu",
+    confirmTitle: "Konfirmasi",
+    confirmBtn: "Kirim Pesanan",
+    cancelBtn: "Batal",
+    paymentTitle: "Pesanan Selesai",
+    paymentMsg: "Silakan bayar kepada petugas yang berwenang. Terima kasih!",
+    paymentClose: "OK",
+    submit: (n) => `Kirim pesanan (${n})`,
+    ordersEmpty: "Belum ada pesanan",
+    adminEntry: "Login Admin",
+    adminLogin: "Login Admin",
+    adminPwPlaceholder: "Masukkan kata sandi",
+    adminPwError: "Kata sandi salah",
+    adminLoginBtn: "Masuk",
+    showPw: "Tampilkan", hidePw: "Sembunyikan",
+    passwordLabel: "Kata sandi",
+    adminTitle: "Panel Admin",
+    switchMode: "Halaman Pemesanan",
+    logout: "Keluar",
+    tabSchedule: "Jadwal",
+    tabRestaurants: "Restoran",
+    tabOrders: "Pesanan",
+    thisWeek: "Minggu ini", nextWeek: "Minggu depan",
+    noSchedule: "Belum diatur",
+    noOrderLabel: "Tidak ada pemesanan",
+    todayLabel: "Hari ini",
+    dishes: "menu",
+    ordersCount: "pesanan",
+    scheduleSummary: "Ringkasan jadwal",
+    notArranged: "—",
+    noScheduleYet: "Belum ada jadwal",
+    statTitle: "Statistik",
+    total: "Total", orders: "pesanan",
+    clearDay: "Hapus pesanan hari ini",
+    confirmClear: (d) => `Hapus pesanan ${d}?`,
+    addRestaurant: "Tambah restoran",
+    editTitle: "Edit Restoran", addTitle: "Tambah Restoran",
+    nameLabel: "Nama *", noteLabel: "Catatan",
+    colorLabel: "Warna",
+    notePlaceholder2: "Telepon, hari libur (opsional)",
+    menuItems: "Menu", noItems: "Belum ada item",
+    itemNamePh: "Nama item", itemPricePh: "Harga",
+    addBtn: "Tambah", saveBtn: "Simpan", createBtn: "Buat",
+    deleteConfirm: "Yakin hapus restoran ini?",
+    editBtn: "Edit", deleteBtn: "Hapus",
+    today: "Hari ini", tomorrow: "Besok",
+    weekdays: ["Sen","Sel","Rab","Kam","Jum","Sab","Min"],
+    weekdaysShort: ["Sn","Sl","Rb","Km","Jm","Sb","Mg"],
+    dupNote: (name) => `Pesanan ${name} diperbarui`,
+    nameHint: "Untuk mengubah pesanan, pesan ulang dengan nama yang sama dan akan menggantikan pesanan sebelumnya",
+    nameHintAdmin: "Perubahan ini akan terlihat di riwayat pesanan admin",
+    editedLabel: "Diperbarui",
+    editHistory: "Riwayat perubahan",
+    prevOrder: "Sebelumnya",
+    bookingFor: (day, date) => `Reservasi ${day} ${date}`,
+    bookingDeadline: "Batas waktu 09:00 hari itu",
+    draftChanged: "Ada perubahan jadwal yang belum disimpan",
+    draftConfirm: "Konfirmasi Jadwal",
+    draftDiscard: "Buang perubahan",
+    draftSaved: "Jadwal diterapkan",
+    cancelOrderItem: "Batalkan pesanan hari ini",
+    cancelOrderNote: "Pilih ini untuk membatalkan pesanan Anda",
+    cancelledLabel: "Dibatalkan",
+    minDelivery: "Minimum pengiriman",
+    minDeliveryPh: "contoh: 10",
+    deliveryProgress: (cur, min) => `${cur} porsi / min ${min} porsi`,
+    deliveryMet: (min) => `Minimum ${min} porsi terpenuhi`,
+    deliveryShort: (n) => `Kurang ${n} porsi`,
+    specialNoteLabel: "Catatan khusus",
+    confirmDeleteOrder: (name) => `Hapus pesanan ${name}?`,
+  },
+  vi: {
+    label: "Tiếng Việt",
+    selectDay: "Chọn ngày",
+    notSetToday: "Chưa có nhà hàng hôm nay",
+    noOrderToday: "Hôm nay không đặt cơm",
+    waitAdmin: "Vui lòng chờ admin cài đặt lịch",
+    deadlinePrefix: "Hạn",
+    deadlineRemain: "Còn",
+    advanceBooking: "Đặt trước",
+    closedToday: "Đặt món hôm nay đã đóng (09:00)",
+    closedDay: "Đặt món ngày đó đã đóng",
+    noRestaurant: "Chưa có lịch nhà hàng",
+    closedTitle: "Đã hết giờ đặt món",
+    closedSub: "Hạn chót 09:00",
+    yourName: "Tên",
+    namePlaceholder: "Nhập họ và tên đầy đủ (VD: Nguyễn Văn Minh)",
+    orderItems: "Chọn món",
+    notePlaceholder: "Ghi chú (không rau mùi, v.v.)",
+    inquire: "Hỏi giá",
+    yourOrder: "Xác nhận đặt món",
+    subtotal: "Tạm tính",
+    selectFirst: "Vui lòng chọn món",
+    confirmTitle: "Xác nhận",
+    confirmBtn: "Xác nhận đặt",
+    cancelBtn: "Hủy",
+    paymentTitle: "Đặt món thành công",
+    paymentMsg: "Vui lòng nộp tiền cơm cho người phụ trách. Xin cảm ơn!",
+    paymentClose: "OK",
+    submit: (n) => `Đặt món (${n} món)`,
+    ordersEmpty: "Chưa có đơn hàng",
+    adminEntry: "Cổng quản trị",
+    adminLogin: "Đăng nhập quản trị",
+    adminPwPlaceholder: "Nhập mật khẩu",
+    adminPwError: "Sai mật khẩu",
+    adminLoginBtn: "Đăng nhập",
+    showPw: "Hiện", hidePw: "Ẩn",
+    passwordLabel: "Mật khẩu",
+    adminTitle: "Quản trị",
+    switchMode: "Trang đặt món",
+    logout: "Đăng xuất",
+    tabSchedule: "Lịch nhà hàng",
+    tabRestaurants: "Nhà hàng",
+    tabOrders: "Đơn hàng",
+    thisWeek: "Tuần này", nextWeek: "Tuần sau",
+    noSchedule: "Chưa sắp xếp",
+    noOrderLabel: "Không đặt cơm",
+    todayLabel: "Hôm nay",
+    dishes: "món",
+    ordersCount: "đơn",
+    scheduleSummary: "Tóm tắt lịch",
+    notArranged: "—",
+    noScheduleYet: "Chưa có lịch",
+    statTitle: "Thống kê",
+    total: "Tổng", orders: "đơn",
+    clearDay: "Xóa đơn ngày này",
+    confirmClear: (d) => `Xóa đơn hàng ngày ${d}?`,
+    addRestaurant: "Thêm nhà hàng",
+    editTitle: "Sửa nhà hàng", addTitle: "Thêm nhà hàng",
+    nameLabel: "Tên *", noteLabel: "Ghi chú",
+    colorLabel: "Màu",
+    notePlaceholder2: "Điện thoại, ngày nghỉ (tùy chọn)",
+    menuItems: "Thực đơn", noItems: "Chưa có món",
+    itemNamePh: "Tên món", itemPricePh: "Giá",
+    addBtn: "Thêm", saveBtn: "Lưu", createBtn: "Tạo",
+    deleteConfirm: "Xác nhận xóa nhà hàng này?",
+    editBtn: "Sửa", deleteBtn: "Xóa",
+    today: "Hôm nay", tomorrow: "Ngày mai",
+    weekdays: ["Thứ 2","Thứ 3","Thứ 4","Thứ 5","Thứ 6","Thứ 7","CN"],
+    weekdaysShort: ["T2","T3","T4","T5","T6","T7","CN"],
+    dupNote: (name) => `Đã cập nhật đơn của ${name}`,
+    nameHint: "Để sửa đơn hàng, đặt lại với cùng tên sẽ ghi đè đơn trước",
+    nameHintAdmin: "Thay đổi này sẽ hiển thị trong lịch sử đơn hàng của admin",
+    editedLabel: "Đã sửa",
+    editHistory: "Lịch sử thay đổi",
+    prevOrder: "Trước đó",
+    bookingFor: (day, date) => `Đặt trước ${day} ${date}`,
+    bookingDeadline: "Hạn chót 09:00 ngày đó",
+    draftChanged: "Có thay đổi lịch chưa được lưu",
+    draftConfirm: "Xác nhận lịch",
+    draftDiscard: "Hủy thay đổi",
+    draftSaved: "Đã áp dụng lịch",
+    cancelOrderItem: "Hủy đặt cơm hôm nay",
+    cancelOrderNote: "Chọn mục này để hủy đơn hàng của bạn",
+    cancelledLabel: "Đã hủy",
+    minDelivery: "Số lượng giao tối thiểu",
+    minDeliveryPh: "vd: 10",
+    deliveryProgress: (cur, min) => `${cur} phần / tối thiểu ${min} phần`,
+    deliveryMet: (min) => `Đã đạt tối thiểu ${min} phần`,
+    deliveryShort: (n) => `Còn thiếu ${n} phần`,
+    specialNoteLabel: "Ghi chú đặc biệt",
+    confirmDeleteOrder: (name) => `Xóa đơn hàng của ${name}?`,
+  },
+};
+
+// ─────────────────────────────────────────────
+// MENU TRANSLATIONS
+// ─────────────────────────────────────────────
+const ITEM_NAMES = {
+  101:{zh:"雞腿飯",id:"Nasi Paha Ayam",vi:"Cơm Đùi Gà"},
+  102:{zh:"滷雞腿飯",id:"Nasi Paha Ayam Rebus",vi:"Cơm Đùi Gà Kho"},
+  103:{zh:"排骨飯",id:"Nasi Iga Babi",vi:"Cơm Sườn Heo"},
+  104:{zh:"雞排飯",id:"Nasi Ayam Goreng",vi:"Cơm Gà Chiên"},
+  105:{zh:"香酥腿排飯",id:"Nasi Paha+Iga Crispy",vi:"Cơm Đùi+Sườn Giòn"},
+  106:{zh:"焢肉飯",id:"Nasi Daging Semur",vi:"Cơm Thịt Kho"},
+  107:{zh:"滷排骨飯",id:"Nasi Iga Rebus",vi:"Cơm Sườn Kho"},
+  108:{zh:"虱目魚飯",id:"Nasi Ikan Bandeng",vi:"Cơm Cá Sữa"},
+  109:{zh:"鱸魚飯",id:"Nasi Ikan Kakap",vi:"Cơm Cá Vược"},
+  110:{zh:"鯖魚飯",id:"Nasi Ikan Tenggiri",vi:"Cơm Cá Thu"},
+  111:{zh:"無骨雞排飯",id:"Nasi Ayam Fillet",vi:"Cơm Gà Phi Lê"},
+  112:{zh:"雞腿",id:"Paha Ayam",vi:"Đùi Gà"},
+  113:{zh:"雞排",id:"Ayam Goreng",vi:"Gà Chiên"},
+  114:{zh:"排骨",id:"Iga Babi",vi:"Sườn Heo"},
+  115:{zh:"魚排",id:"Fillet Ikan",vi:"Cá Chiên"},
+  116:{zh:"白飯",id:"Nasi Putih",vi:"Cơm Trắng"},
+  201:{zh:"炸大雞腿飯",id:"Nasi Paha Ayam Goreng",vi:"Cơm Đùi Gà Chiên"},
+  202:{zh:"香雞排飯",id:"Nasi Ayam Crispy",vi:"Cơm Gà Giòn"},
+  203:{zh:"排骨飯",id:"Nasi Iga Babi",vi:"Cơm Sườn Heo"},
+  204:{zh:"腿排飯",id:"Nasi Paha+Iga",vi:"Cơm Đùi+Sườn"},
+  205:{zh:"控肉飯",id:"Nasi Daging Semur",vi:"Cơm Thịt Hầm"},
+  206:{zh:"滷雞腿飯",id:"Nasi Paha Rebus",vi:"Cơm Đùi Kho"},
+  207:{zh:"鯖魚飯",id:"Nasi Ikan Tenggiri",vi:"Cơm Cá Thu"},
+  208:{zh:"哈克魚飯",id:"Nasi Ikan Hake",vi:"Cơm Cá Hake"},
+  209:{zh:"三杯雞飯",id:"Nasi Ayam Tiga Cangkir",vi:"Cơm Gà Ba Chén"},
+  210:{zh:"糖醋雞丁飯",id:"Nasi Ayam Asam Manis",vi:"Cơm Gà Chua Ngọt"},
+  211:{zh:"菜飯便當",id:"Bento Nasi Sayur",vi:"Cơm Hộp Rau"},
+  212:{zh:"印尼便當",id:"Bento Indonesia",vi:"Cơm Hộp Indonesia"},
+  213:{zh:"大雞腿（單點）",id:"Paha Ayam Besar",vi:"Đùi Gà Lớn"},
+  214:{zh:"香雞排（單點）",id:"Ayam Crispy",vi:"Gà Giòn"},
+  215:{zh:"排骨（單點）",id:"Iga Babi",vi:"Sườn Heo"},
+  216:{zh:"腿排（單點）",id:"Paha+Iga",vi:"Đùi+Sườn"},
+  217:{zh:"控肉（單點）",id:"Daging Semur",vi:"Thịt Hầm"},
+  218:{zh:"滷雞腿（單點）",id:"Paha Rebus",vi:"Đùi Kho"},
+  219:{zh:"鯖魚（單點）",id:"Ikan Tenggiri",vi:"Cá Thu"},
+  220:{zh:"哈克魚（單點）",id:"Ikan Hake",vi:"Cá Hake"},
+  221:{zh:"魯蛋",id:"Telur Rebus Bumbu",vi:"Trứng Kho"},
+  301:{zh:"招牌飯",id:"Nasi Andalan",vi:"Cơm Đặc Biệt"},
+  302:{zh:"雞腿飯",id:"Nasi Paha Ayam",vi:"Cơm Đùi Gà"},
+  303:{zh:"排骨飯",id:"Nasi Iga Babi",vi:"Cơm Sườn Heo"},
+  304:{zh:"燻肉飯",id:"Nasi Daging Asap",vi:"Cơm Thịt Xông Khói"},
+  305:{zh:"鯖魚飯",id:"Nasi Ikan Tenggiri",vi:"Cơm Cá Thu"},
+  306:{zh:"香雞排飯",id:"Nasi Ayam Crispy",vi:"Cơm Gà Giòn"},
+  307:{zh:"滷雞腿排飯",id:"Nasi Paha+Iga Rebus",vi:"Cơm Đùi+Sườn Kho"},
+  308:{zh:"麥克雞塊飯",id:"Nasi Nugget Ayam",vi:"Cơm Nugget Gà"},
+  309:{zh:"兒童餐",id:"Menu Anak",vi:"Phần Trẻ Em"},
+  310:{zh:"經濟餐",id:"Menu Ekonomis",vi:"Phần Tiết Kiệm"},
+};
+const getItemName = (item, lang) => ITEM_NAMES[item.id]?.[lang] || item.name;
+
+// ─────────────────────────────────────────────
+// RESTAURANT DATA
+// ─────────────────────────────────────────────
+const INITIAL_RESTAURANTS = [
+  { id:1, name:"小南排骨雞腿大王", color:"#C0392B", note:"民生店：7213295・7213296｜週一公休", minDelivery:10,
+    items:[
+      {id:101,name:"雞腿飯",price:100,singleOrder:false},{id:102,name:"滷雞腿飯",price:100,singleOrder:false},
+      {id:103,name:"排骨飯",price:90,singleOrder:false},{id:104,name:"雞排飯",price:90,singleOrder:false},
+      {id:105,name:"香酥腿排飯",price:80,singleOrder:false},{id:106,name:"焢肉飯",price:80,singleOrder:false},
+      {id:107,name:"滷排骨飯",price:90,singleOrder:false},{id:108,name:"虱目魚飯",price:90,singleOrder:false},
+      {id:109,name:"鱸魚飯",price:90,singleOrder:false},{id:110,name:"鯖魚飯",price:80,singleOrder:false},
+      {id:111,name:"無骨雞排飯",price:80,singleOrder:false},
+      {id:112,name:"雞腿",price:70,singleOrder:true},{id:113,name:"雞排",price:65,singleOrder:true},
+      {id:114,name:"排骨",price:55,singleOrder:true},{id:115,name:"魚排",price:55,singleOrder:true},
+      {id:116,name:"白飯",price:10,singleOrder:true},
+    ]},
+  { id:2, name:"阿圓便當", color:"#E67E22", note:"中正路172號・08-7210139｜週六日公休", minDelivery:10,
+    items:[
+      {id:201,name:"炸大雞腿飯",price:100,singleOrder:false},{id:202,name:"香雞排飯",price:100,singleOrder:false},
+      {id:203,name:"排骨飯",price:85,singleOrder:false},{id:204,name:"腿排飯",price:80,singleOrder:false},
+      {id:205,name:"控肉飯",price:80,singleOrder:false},{id:206,name:"滷雞腿飯",price:80,singleOrder:false},
+      {id:207,name:"鯖魚飯",price:80,singleOrder:false},{id:208,name:"哈克魚飯",price:85,singleOrder:false},
+      {id:209,name:"三杯雞飯",price:85,singleOrder:false},{id:210,name:"糖醋雞丁飯",price:85,singleOrder:false},
+      {id:211,name:"菜飯便當",price:55,singleOrder:false},{id:212,name:"印尼便當",price:0,singleOrder:false},
+      {id:213,name:"大雞腿",price:60,singleOrder:true},{id:214,name:"香雞排",price:60,singleOrder:true},
+      {id:215,name:"排骨",price:45,singleOrder:true},{id:216,name:"腿排",price:40,singleOrder:true},
+      {id:217,name:"控肉",price:40,singleOrder:true},{id:218,name:"滷雞腿",price:40,singleOrder:true},
+      {id:219,name:"鯖魚",price:40,singleOrder:true},{id:220,name:"哈克魚",price:45,singleOrder:true},
+      {id:221,name:"魯蛋",price:15,singleOrder:true},
+    ]},
+  { id:3, name:"池上飯包", color:"#8B2500", note:"特力屋對面", minDelivery:10,
+    items:[
+      {id:301,name:"招牌飯",price:80,singleOrder:false},{id:302,name:"雞腿飯",price:105,singleOrder:false},
+      {id:303,name:"排骨飯",price:90,singleOrder:false},{id:304,name:"燻肉飯",price:85,singleOrder:false},
+      {id:305,name:"鯖魚飯",price:85,singleOrder:false},{id:306,name:"香雞排飯",price:85,singleOrder:false},
+      {id:307,name:"滷雞腿排飯",price:100,singleOrder:false},{id:308,name:"麥克雞塊飯",price:85,singleOrder:false},
+      {id:309,name:"兒童餐",price:80,singleOrder:false},{id:310,name:"經濟餐",price:70,singleOrder:false},
+    ]},
+];
+
+const COLORS = ["#C0392B","#8B2500","#E67E22","#D4A017","#27AE60","#2980B9","#8E44AD","#16A085","#D35400","#2C3E50"];
+const NO_ORDER_ID = "NO_ORDER";
+const CANCEL_ORDER_ID = "__CANCEL__"; // sentinel item id for "cancel order"
+const jsToIdx = d => d === 0 ? 6 : d - 1;
+const DEADLINE_HOUR = 9;
+
+// ─────────────────────────────────────────────
+// DATE / DEADLINE UTILS
+// ─────────────────────────────────────────────
+function makeDateStr(d) {
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+}
+const todayStr = () => makeDateStr(new Date());
+const tomorrowStr = () => { const d = new Date(); d.setDate(d.getDate()+1); return makeDateStr(d); };
+const formatDate = ds => { const d = new Date(ds+"T00:00:00"); return `${d.getMonth()+1}/${d.getDate()}`; };
+
+function getDayLabel(ds, t) {
+  if (ds === todayStr()) return t.today;
+  if (ds === tomorrowStr()) return t.tomorrow;
+  return t.weekdays[jsToIdx(new Date(ds+"T00:00:00").getDay())];
+}
+function getWeekDates() {
+  const now = new Date(), idx = jsToIdx(now.getDay()), mon = new Date(now);
+  mon.setDate(now.getDate() - idx);
+  return Array.from({length:7}, (_,i) => { const d = new Date(mon); d.setDate(mon.getDate()+i); return makeDateStr(d); });
+}
+function getNextWeekDates() {
+  return getWeekDates().map(ds => { const d = new Date(ds); d.setDate(d.getDate()+7); return makeDateStr(d); });
+}
+function getDeadline(ds) { const d = new Date(ds+"T00:00:00"); d.setHours(DEADLINE_HOUR,0,0,0); return d; }
+const isPast = ds => new Date() > getDeadline(ds);
+
+function useCountdown(ds) {
+  const [ms, setMs] = useState(() => getDeadline(ds) - Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setMs(getDeadline(ds) - Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [ds]);
+  return ms;
+}
+function fmtMs(ms) {
+  if (ms <= 0) return null;
+  const s = Math.floor(ms/1000), h = Math.floor(s/3600), m = Math.floor((s%3600)/60), ss = s%60;
+  if (h > 0) return `${h}h ${m}m`;
+  if (m > 0) return `${m}m ${ss}s`;
+  return `${ss}s`;
+}
+
+// ─────────────────────────────────────────────
+// SMALL COMPONENTS
+// ─────────────────────────────────────────────
+function LangSwitcher({ lang, setLang }) {
+  return (
+    <div className="flex gap-1 shrink-0">
+      {Object.entries(LANGS).map(([key, val]) => (
+        <button key={key} onClick={() => setLang(key)}
+          className={`px-2 py-1 rounded text-xs font-medium whitespace-nowrap transition-colors ${lang === key ? "bg-orange-500 text-white" : "text-gray-400 hover:text-white"}`}>
+          {val.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+// Isolated countdown — only this re-renders every second
+function DeadlineBadge({ ds, t }) {
+  const ms = useCountdown(ds);
+  const past = ms <= 0;
+  const isToday = ds === todayStr();
+  const d = new Date(ds+"T00:00:00");
+  const datePart = `${d.getMonth()+1}/${d.getDate()}`;
+  return (
+    <div className={`text-xs px-3 py-2 rounded-lg flex items-center gap-2 ${past ? "bg-red-500/30 text-red-200" : "bg-black/20 text-white/80"}`}>
+      {past ? (
+        <span className="font-medium">{isToday ? t.closedToday : t.closedDay}</span>
+      ) : (
+        <>
+          <span>{t.deadlinePrefix}</span>
+          <span className="font-semibold">{datePart}</span>
+          <span className="font-black text-yellow-300 text-sm tracking-wide">09:00 AM</span>
+          {ms > 0 && isToday && (
+            <span className="ml-auto text-yellow-300 font-bold">{t.deadlineRemain} {fmtMs(ms)}</span>
+          )}
+          {!isToday && <span className="ml-auto opacity-50 text-xs">{t.advanceBooking}</span>}
+        </>
+      )}
+    </div>
+  );
+}
+
+function Modal({ children, onClose }) {
+  return (
+    <div className="fixed inset-0 bg-black/60 flex items-end sm:items-center justify-center z-50 p-4" onClick={onClose}>
+      <div className="bg-white rounded-2xl w-full max-w-sm shadow-2xl" onClick={e => e.stopPropagation()}>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────
+// ADMIN SCHEDULE SECTION (separate component — avoids hook-in-condition)
+// ─────────────────────────────────────────────
+
+// Returns true if current Taiwan time (UTC+8) is Friday 00:00 or later
+function isNextWeekUnlocked() {
+  const now = new Date();
+  // Taiwan is UTC+8
+  const twOffset = 8 * 60; // minutes
+  const twNow = new Date(now.getTime() + (twOffset + now.getTimezoneOffset()) * 60000);
+  // getDay(): 0=Sun, 1=Mon, ..., 5=Fri, 6=Sat
+  const day = twNow.getDay();
+  // Unlocked from Friday 00:00 through the following Sunday 23:59
+  return day === 5 || day === 6 || day === 0;
+}
+
+// Returns milliseconds until next Friday 00:00 Taiwan time
+function msUntilFridayTW() {
+  const now = new Date();
+  const twOffset = 8 * 60;
+  const twNow = new Date(now.getTime() + (twOffset + now.getTimezoneOffset()) * 60000);
+  const day = twNow.getDay(); // 0=Sun..6=Sat
+  // Days until Friday: Fri=0, Sat=6, Sun=5, Mon=4, Tue=3, Wed=2, Thu=1
+  const daysUntilFri = day === 5 ? 7 : (5 - day + 7) % 7 || 7;
+  const nextFri = new Date(twNow);
+  nextFri.setDate(twNow.getDate() + daysUntilFri);
+  nextFri.setHours(0, 0, 0, 0);
+  // Convert back to UTC
+  const nextFriUTC = new Date(nextFri.getTime() - (twOffset + now.getTimezoneOffset()) * 60000);
+  return Math.max(0, nextFriUTC - now);
+}
+
+function useNextWeekUnlock() {
+  const [unlocked, setUnlocked] = useState(isNextWeekUnlocked);
+  const [ms, setMs] = useState(() => msUntilFridayTW());
+  useEffect(() => {
+    if (unlocked) return;
+    const t = setInterval(() => {
+      const remaining = msUntilFridayTW();
+      setMs(remaining);
+      if (remaining <= 0) setUnlocked(true);
+    }, 1000);
+    return () => clearInterval(t);
+  }, [unlocked]);
+  return { unlocked, ms };
+}
+
+function fmtCountdown(ms) {
+  if (ms <= 0) return "";
+  const s = Math.floor(ms / 1000);
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const ss = s % 60;
+  if (h >= 24) {
+    const d = Math.floor(h / 24);
+    return `${d}天 ${h % 24}時`;
+  }
+  return `${h}時 ${m}分 ${ss}秒`;
+}
+
+function AdminSchedule({ schedule, setSchedule, restaurants, orders, t }) {
+  const [week, setWeek] = useState("this");
+  const [draft, setDraftState] = useState({});
+  const [savedToast, setSavedToast] = useState(false);
+  const today = todayStr();
+  const { unlocked: nextWeekUnlocked, ms: unlockMs } = useNextWeekUnlock();
+
+  const displayDates = week === "this" ? getWeekDates() : getNextWeekDates();
+  const merged = useMemo(() => ({ ...schedule, ...draft }), [schedule, draft]);
+  const hasDraft = Object.keys(draft).length > 0;
+
+  const setDraft = (ds, val) => setDraftState(prev => ({ ...prev, [ds]: val }));
+
+  const applyDraft = () => {
+    setSchedule(prev => ({ ...prev, ...draft }));
+    setDraftState({});
+    setSavedToast(true);
+    setTimeout(() => setSavedToast(false), 2000);
+  };
+
+  return (
+    <div className="space-y-4">
+      {savedToast && (
+        <div className="bg-green-600 text-white text-sm text-center py-2 px-4 rounded-xl font-medium">{t.draftSaved}</div>
+      )}
+
+      {/* Week toggle */}
+      <div className="flex gap-2">
+        {/* This week */}
+        <button onClick={() => setWeek("this")}
+          className={`flex-1 py-2 rounded-lg text-sm font-medium transition-colors ${week === "this" ? "bg-orange-500 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
+          本週
+        </button>
+
+        {/* Next week — locked until Friday 00:00 TW */}
+        <button
+          onClick={() => nextWeekUnlocked && setWeek("next")}
+          disabled={!nextWeekUnlocked}
+          className={`flex-1 py-2 rounded-lg text-sm font-medium transition-colors flex flex-col items-center justify-center gap-0.5
+            ${week === "next" && nextWeekUnlocked ? "bg-orange-500 text-white"
+            : nextWeekUnlocked ? "bg-gray-800 text-gray-400 hover:bg-gray-700"
+            : "bg-gray-800/50 text-gray-600 cursor-not-allowed"}`}>
+          <span>下週</span>
+          {!nextWeekUnlocked && (
+            <span className="text-xs text-gray-500 leading-none">
+              週五解鎖 · {fmtCountdown(unlockMs)}
+            </span>
+          )}
+        </button>
+      </div>
+
+      {/* Next week locked notice */}
+      {!nextWeekUnlocked && week === "next" && (
+        <div className="bg-gray-800 border border-gray-700 rounded-xl p-4 text-center">
+          <p className="text-gray-400 text-sm">下週排程將於週五台灣時間 00:00 開放編輯</p>
+          <p className="text-orange-400 font-bold mt-1">{fmtCountdown(unlockMs)}</p>
+        </div>
+      )}
+
+      {/* Day rows */}
+      <div className="space-y-2">
+        {displayDates.map((ds, idx) => {
+          const isTod = ds === today;
+          const isPastDay = ds < today;
+          const assignedId = merged[ds] ?? null;
+          const isNoOrd = assignedId === NO_ORDER_ID;
+          const assignedRest = isNoOrd ? null : restaurants.find(r => r.id === assignedId);
+          const inDraft = draft[ds] !== undefined;
+          const dayOrders = orders.filter(o => o.dateStr === ds);
+
+          return (
+            <div key={ds}
+              className={`rounded-xl border transition-all ${
+                isTod ? "border-orange-500/50 bg-orange-500/5"
+                : isPastDay ? "border-gray-800 bg-gray-900 opacity-40"
+                : "border-gray-800 bg-gray-900"
+              } ${inDraft ? "ring-1 ring-yellow-500/40" : ""}`}>
+              {/* Header row */}
+              <div className="flex items-center gap-3 px-4 py-3">
+                <div className={`w-10 h-10 rounded-lg flex flex-col items-center justify-center shrink-0 ${isTod ? "bg-orange-500" : "bg-gray-800"}`}>
+                  <span className={`text-xs font-bold leading-none ${isTod ? "text-white" : "text-gray-400"}`}>{t.weekdaysShort[idx]}</span>
+                  <span className={`text-sm font-bold leading-none mt-0.5 ${isTod ? "text-white" : "text-gray-300"}`}>{formatDate(ds).split("/")[1]}</span>
+                </div>
+                <div className="flex-1 min-w-0">
+                  {isNoOrd
+                    ? <span className="text-gray-500 text-sm">{t.noOrderLabel}</span>
+                    : assignedRest
+                      ? <div>
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-white text-sm font-bold truncate">{assignedRest.name}</span>
+                            {inDraft && <span className="text-yellow-400 text-xs shrink-0">●</span>}
+                          </div>
+                          <span className="text-gray-500 text-xs">
+                            {assignedRest.items.length} {t.dishes}
+                            {dayOrders.length > 0 && <span className="ml-2 text-orange-400">{dayOrders.length} {t.ordersCount}</span>}
+                          </span>
+                        </div>
+                      : <div className="flex items-center gap-1.5">
+                          <span className="text-gray-600 text-sm">{t.noSchedule}</span>
+                          {inDraft && <span className="text-yellow-400 text-xs">●</span>}
+                        </div>
+                  }
+                </div>
+                {isTod && <span className="text-xs bg-orange-500 text-white px-2 py-0.5 rounded-full shrink-0">{t.todayLabel}</span>}
+                {assignedId && !isPastDay && (
+                  <button onClick={() => clearDate(ds)} className="text-gray-600 hover:text-red-400 text-xl leading-none w-6 text-center shrink-0">×</button>
+                )}
+              </div>
+
+              {/* Restaurant picker */}
+              {!isPastDay && (
+                <div className="px-4 pb-3">
+                  <div className="flex gap-1.5 flex-wrap">
+                    {restaurants.map(r => (
+                      <button key={r.id}
+                        onClick={() => setDraft(ds, assignedId === r.id ? null : r.id)}
+                        className={`px-3 py-1 rounded-lg text-xs font-medium border transition-all ${assignedId === r.id ? "text-white" : "border-gray-700 text-gray-400 hover:text-white bg-gray-800"}`}
+                        style={assignedId === r.id ? { background: r.color, borderColor: r.color } : {}}>
+                        {r.name}{assignedId === r.id ? " ✓" : ""}
+                      </button>
+                    ))}
+                    <button onClick={() => setDraft(ds, assignedId === NO_ORDER_ID ? null : NO_ORDER_ID)}
+                      className={`px-3 py-1 rounded-lg text-xs font-medium border transition-all ${assignedId === NO_ORDER_ID ? "bg-gray-600 border-gray-500 text-white" : "border-gray-700 text-gray-500 hover:text-gray-300 bg-gray-800"}`}>
+                      {t.noOrderLabel}{assignedId === NO_ORDER_ID ? " ✓" : ""}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Draft action bar */}
+      {hasDraft && (
+        <div className="rounded-2xl overflow-hidden shadow-lg">
+          {/* Top notice strip */}
+          <div className="bg-amber-400 px-4 py-2.5 flex items-center gap-2">
+            <div className="w-2 h-2 rounded-full bg-amber-900 animate-pulse shrink-0"/>
+            <p className="text-amber-900 text-sm font-bold">{t.draftChanged}</p>
+          </div>
+          {/* Action buttons */}
+          <div className="flex">
+            <button onClick={() => setDraftState({})}
+              className="flex-1 py-3.5 bg-gray-700 text-gray-200 text-sm font-medium hover:bg-gray-600 transition-colors">
+              {t.draftDiscard}
+            </button>
+            <button onClick={applyDraft}
+              className="flex-1 py-3.5 text-white text-sm font-bold transition-colors"
+              style={{background:"linear-gradient(135deg,#16a34a,#15803d)"}}>
+              {t.draftConfirm}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Summary */}
+      <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
+        <p className="text-xs text-gray-500 font-medium mb-3">{t.scheduleSummary}</p>
+        <div className="space-y-1.5">
+          {displayDates.map((ds, i) => {
+            const sid = merged[ds];
+            const r = sid && sid !== NO_ORDER_ID ? restaurants.find(x => x.id === sid) : null;
+            const pending = draft[ds] !== undefined;
+            return (
+              <div key={ds} className="flex items-center justify-between text-sm">
+                <span className={pending ? "text-yellow-500/80" : "text-gray-500"}>{t.weekdays[i]} {formatDate(ds)}</span>
+                {!sid
+                  ? <span className="text-gray-700 text-xs">{t.notArranged}</span>
+                  : sid === NO_ORDER_ID
+                    ? <span className={`text-xs ${pending ? "text-yellow-400" : "text-gray-500"}`}>{t.noOrderLabel}</span>
+                    : <span className="font-medium text-sm" style={pending ? {color:"#FBBF24"} : {color: r?.color}}>
+                        {r?.name}{pending ? " *" : ""}
+                      </span>
+                }
+              </div>
+            );
+          })}
+        </div>
+        {hasDraft && <p className="text-yellow-500/60 text-xs mt-2">* {t.draftChanged}</p>}
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────
+// RESTAURANT FORM
+// ─────────────────────────────────────────────
+function RestaurantForm({ title, data, setData, itemInput, setItemInput, onSave, onCancel, t }) {
+  const [addIsSingle, setAddIsSingle] = useState(false);
+
+  const addItem = () => {
+    if (!itemInput.name || !itemInput.price) return;
+    setData({ ...data, items: [...data.items, { id: Date.now(), name: itemInput.name, price: Number(itemInput.price), singleOrder: addIsSingle }] });
+    setItemInput({ name: "", price: "" });
+  };
+
+  const mainItems = data.items.filter(i => !i.singleOrder);
+  const singleItems = data.items.filter(i => i.singleOrder);
+
+  const renderItemList = (items, label) => (
+    <div className="mb-3">
+      <p className="text-xs text-gray-500 mb-1.5">{label}</p>
+      {items.length === 0
+        ? <p className="text-gray-700 text-xs text-center py-1.5 italic">（尚無品項）</p>
+        : items.map(item => (
+          <div key={item.id} className="flex items-center justify-between bg-gray-800 rounded-lg px-3 py-2 mb-1">
+            <span className="text-white text-sm">{item.name}</span>
+            <div className="flex items-center gap-2">
+              <span className="text-orange-400 text-sm">NT${item.price}</span>
+              <button
+                onClick={() => {
+                  const updated = data.items.map(i => i.id === item.id ? {...i, singleOrder: !i.singleOrder} : i);
+                  setData({...data, items: updated});
+                }}
+                className="text-xs text-blue-400 hover:text-blue-300 px-1.5 py-0.5 rounded border border-blue-800 hover:border-blue-600 transition-colors"
+                title="切換便當/單點">
+                {item.singleOrder ? "→便當" : "→單點"}
+              </button>
+              <button onClick={() => setData({...data, items: data.items.filter(i => i.id !== item.id)})}
+                className="text-gray-600 hover:text-red-400 text-lg leading-none">×</button>
+            </div>
+          </div>
+        ))
+      }
+    </div>
+  );
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center gap-2">
+        <button onClick={onCancel} className="text-gray-500 hover:text-white text-2xl leading-none">‹</button>
+        <span className="text-white font-bold">{title}</span>
+      </div>
+      <div className="bg-gray-900 border border-gray-800 rounded-xl p-4 space-y-3">
+        <div>
+          <label className="text-xs text-gray-500 mb-1 block">{t.nameLabel}</label>
+          <input value={data.name} onChange={e => setData({...data, name: e.target.value})} placeholder="eg. 便當店"
+            className="w-full bg-gray-800 text-white rounded-lg px-3 py-2.5 text-sm outline-none border border-gray-700 focus:border-orange-500 transition-colors"/>
+        </div>
+        <div>
+          <label className="text-xs text-gray-500 mb-1 block">{t.noteLabel}</label>
+          <input value={data.note} onChange={e => setData({...data, note: e.target.value})} placeholder={t.notePlaceholder2}
+            className="w-full bg-gray-800 text-white rounded-lg px-3 py-2.5 text-sm outline-none border border-gray-700 focus:border-orange-500 transition-colors"/>
+        </div>
+        <div>
+          <label className="text-xs text-gray-500 mb-1 block">{t.minDelivery}</label>
+          <input value={data.minDelivery ?? ""} onChange={e => setData({...data, minDelivery: Number(e.target.value)||0})}
+            placeholder={t.minDeliveryPh} type="number" min="0"
+            className="w-full bg-gray-800 text-white rounded-lg px-3 py-2.5 text-sm outline-none border border-gray-700 focus:border-orange-500 transition-colors"/>
+        </div>
+        <div>
+          <label className="text-xs text-gray-500 mb-2 block">{t.colorLabel}</label>
+          <div className="flex gap-2 flex-wrap">
+            {COLORS.map(c => (
+              <button key={c} onClick={() => setData({...data, color: c})}
+                className="w-7 h-7 rounded-lg hover:scale-110 transition-transform"
+                style={{ background: c, outline: data.color === c ? "2px solid white" : "none", outlineOffset: "2px" }}/>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
+        <p className="text-sm font-medium text-white mb-3">{t.menuItems}</p>
+        <div className="max-h-64 overflow-y-auto">
+          {renderItemList(mainItems, "便當 / 正餐")}
+          {renderItemList(singleItems, "單點")}
+        </div>
+
+        {/* Add item row */}
+        <div className="mt-3 border-t border-gray-800 pt-3 space-y-2">
+          {/* Type selector */}
+          <div className="flex gap-2">
+            <button onClick={() => setAddIsSingle(false)}
+              className={`flex-1 py-1.5 rounded-lg text-xs font-medium transition-colors ${!addIsSingle ? "bg-orange-500 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
+              便當 / 正餐
+            </button>
+            <button onClick={() => setAddIsSingle(true)}
+              className={`flex-1 py-1.5 rounded-lg text-xs font-medium transition-colors ${addIsSingle ? "bg-blue-600 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
+              單點
+            </button>
+          </div>
+          <div className="flex gap-2">
+            <input value={itemInput.name} onChange={e => setItemInput({...itemInput, name: e.target.value})}
+              placeholder={t.itemNamePh} onKeyDown={e => e.key === "Enter" && addItem()}
+              className="flex-1 bg-gray-800 text-white rounded-lg px-3 py-2 text-sm outline-none border border-gray-700 focus:border-orange-500 transition-colors"/>
+            <input value={itemInput.price} onChange={e => setItemInput({...itemInput, price: e.target.value})}
+              placeholder={t.itemPricePh} type="number" onKeyDown={e => e.key === "Enter" && addItem()}
+              className="w-20 bg-gray-800 text-white rounded-lg px-3 py-2 text-sm outline-none border border-gray-700 focus:border-orange-500 transition-colors"/>
+            <button onClick={addItem} className="bg-orange-500 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-orange-600 transition-colors">{t.addBtn}</button>
+          </div>
+        </div>
+      </div>
+
+      <button onClick={onSave} disabled={!data.name}
+        className="w-full py-3 rounded-xl bg-orange-500 text-white font-bold hover:bg-orange-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
+        {title === t.addTitle ? t.createBtn : t.saveBtn}
+      </button>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────
+// MAIN APP
+// ─────────────────────────────────────────────
+export default function App() {
+  const [lang, setLang] = useState("zh");
+  const t = LANGS[lang];
+
+  // ── Firestore-backed shared state ─────────────────────────────
+  const [loaded, setLoaded] = useState(false);
+  const [fbError, setFbError] = useState(false);
+  const [restaurants, setRestaurantsState] = useState(INITIAL_RESTAURANTS);
+  const [schedule, setScheduleState] = useState({});
+  const [orders, setOrdersState] = useState([]);
+  const [orderHistory, setOrderHistoryState] = useState({});
+
+  // Load Firebase and subscribe to all docs
+  useEffect(() => {
+    let unsubs = [];
+    loadFirebase().then(db => {
+      let done = 0;
+      const checkDone = () => { done++; if (done === 4) setLoaded(true); };
+      const sub = (docId, setter, fallback) => {
+        const ref = db.collection("appdata").doc(docId);
+        const unsub = ref.onSnapshot(snap => {
+          if (snap.exists) setter(snap.data().value ?? fallback);
+          checkDone();
+        }, () => checkDone());
+        unsubs.push(unsub);
+      };
+      sub("restaurants", setRestaurantsState, INITIAL_RESTAURANTS);
+      sub("schedule",    setScheduleState,    {});
+      sub("orders",      setOrdersState,      []);
+      sub("orderHistory",setOrderHistoryState,{});
+    }).catch(() => {
+      setFbError(true);
+      setLoaded(true);
+    });
+    return () => unsubs.forEach(u => u());
+  }, []);
+
+  // Firestore write helper
+  const fbSet = (docId, value) => {
+    if (!window._fbDb) return;
+    window._fbDb.collection("appdata").doc(docId).set({ value }).catch(() => {});
+  };
+
+  // Wrapped setters — update local state + write to Firestore
+  const setRestaurants = useCallback((updater) => {
+    setRestaurantsState(prev => {
+      const next = typeof updater === "function" ? updater(prev) : updater;
+      fbSet("restaurants", next);
+      return next;
+    });
+  }, []);
+
+  const setSchedule = useCallback((updater) => {
+    setScheduleState(prev => {
+      const next = typeof updater === "function" ? updater(prev) : updater;
+      fbSet("schedule", next);
+      return next;
+    });
+  }, []);
+
+  const setOrders = useCallback((updater) => {
+    setOrdersState(prev => {
+      const next = typeof updater === "function" ? updater(prev) : updater;
+      fbSet("orders", next);
+      return next;
+    });
+  }, []);
+
+  const setOrderHistory = useCallback((updater) => {
+    setOrderHistoryState(prev => {
+      const next = typeof updater === "function" ? updater(prev) : updater;
+      fbSet("orderHistory", next);
+      return next;
+    });
+  }, []);
+
+  // Loading / error screen
+  if (!loaded) return (
+    <div className="min-h-screen bg-gray-100 flex items-center justify-center" style={{fontFamily:"'Noto Sans TC','PingFang TC',sans-serif"}}>
+      <div className="text-center">
+        <div className="w-8 h-8 border-2 border-orange-500 border-t-transparent rounded-full animate-spin mx-auto mb-3"/>
+        <p className="text-gray-500 text-sm">連線中…</p>
+      </div>
+    </div>
+  );
+
+  if (fbError) return (
+    <div className="min-h-screen bg-gray-100 flex items-center justify-center p-6" style={{fontFamily:"'Noto Sans TC','PingFang TC',sans-serif"}}>
+      <div className="bg-white rounded-2xl p-6 text-center shadow-sm max-w-xs">
+        <p className="text-red-500 font-bold mb-2">連線失敗</p>
+        <p className="text-gray-500 text-sm">無法連接 Firebase，請確認網路並重新整理頁面</p>
+        <button onClick={() => window.location.reload()} className="mt-4 px-6 py-2 bg-orange-500 text-white rounded-xl text-sm font-bold">重新整理</button>
+      </div>
+    </div>
+  );
+
+  // Auth
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [showAdminLogin, setShowAdminLogin] = useState(false);
+  const [pwInput, setPwInput] = useState("");
+  const [showPw, setShowPw] = useState(false);
+  const [pwError, setPwError] = useState(false);
+  const [adminPassword] = useState("admin123");
+
+  // Admin UI
+  const [adminSection, setAdminSection] = useState("schedule");
+  const [adminOrdersDate, setAdminOrdersDate] = useState(todayStr());
+  const [editingRest, setEditingRest] = useState(null);
+  const [addingRest, setAddingRest] = useState(false);
+  const [newRest, setNewRest] = useState({ name:"", color:"#E67E22", note:"", minDelivery:10, items:[] });
+  const [newItemInput, setNewItemInput] = useState({ name:"", price:"" });
+  const [editItemInput, setEditItemInput] = useState({ name:"", price:"" });
+  // Confirm modal for destructive actions
+  const [confirmModal, setConfirmModal] = useState(null); // { message, onConfirm }
+
+  // Order form
+  const [orderingDate, setOrderingDate] = useState(todayStr());
+  const [personName, setPersonName] = useState("");
+  const [cart, setCart] = useState({});
+  const [showConfirm, setShowConfirm] = useState(false);
+  const [showPayment, setShowPayment] = useState(false);
+  const [dupToast, setDupToast] = useState("");
+
+  const today = todayStr();
+  const isToday = orderingDate === today;
+  const activeRestaurantId = schedule[orderingDate] ?? null;
+  const isNoOrder = activeRestaurantId === NO_ORDER_ID;
+  const activeRestaurant = isNoOrder ? null : restaurants.find(r => r.id === activeRestaurantId) ?? null;
+  const deadlinePast = isPast(orderingDate);
+
+  const upcomingSlots = useMemo(() => (
+    Array.from({length:7}, (_,i) => {
+      const d = new Date(); d.setDate(d.getDate()+i);
+      const ds = makeDateStr(d);
+      const sid = schedule[ds];
+      if (!sid) return null;
+      if (sid === NO_ORDER_ID) return { dateStr: ds, restaurant: null, noOrder: true };
+      const r = restaurants.find(x => x.id === sid);
+      return r ? { dateStr: ds, restaurant: r, noOrder: false } : null;
+    }).filter(Boolean)
+  ), [schedule, restaurants]);
+
+  const cartTotal = useMemo(() => (
+    Object.entries(cart).reduce((sum, [id, v]) => {
+      const item = activeRestaurant?.items.find(i => i.id === Number(id));
+      return sum + (item ? item.price * v.qty : 0);
+    }, 0)
+  ), [cart, activeRestaurant]);
+
+  const cartCount = useMemo(() => Object.values(cart).reduce((s,v) => s+v.qty, 0), [cart]);
+
+  const setQty = useCallback((itemId, delta) => setCart(prev => {
+    const cur = prev[itemId]?.qty || 0, next = Math.max(0, cur+delta);
+    if (next === 0) { const {[itemId]:_, ...rest} = prev; return rest; }
+    const prevNotes = prev[itemId]?.notes || [];
+    // Grow or shrink the notes array to match new qty
+    const newNotes = Array.from({length: next}, (_,i) => prevNotes[i] || "");
+    return { ...prev, [itemId]: { qty:next, notes: newNotes } };
+  }), []);
+
+  const setNote = useCallback((itemId, note) => setCart(prev =>
+    prev[itemId] ? { ...prev, [itemId]: { ...prev[itemId], note } } : prev
+  ), []);
+
+  const switchDate = useCallback(ds => { setOrderingDate(ds); setCart({}); }, []);
+
+  const confirmOrder = () => {
+    setShowConfirm(false);
+    const isCancelOrder = CANCEL_ORDER_ID in cart;
+    const lines = isCancelOrder
+      ? [{ item: { id: CANCEL_ORDER_ID, name: "取消今日訂餐", price: 0 }, qty: 1, notes: [] }]
+      : Object.entries(cart).map(([id,v]) => ({
+          item: activeRestaurant.items.find(i => i.id === Number(id)),
+          qty: v.qty, notes: v.notes || [],
+        }));
+    const newOrder = {
+      id: Date.now(), person: personName, dateStr: orderingDate,
+      restaurantId: activeRestaurantId, lines,
+      total: isCancelOrder ? 0 : lines.reduce((s,l) => s + l.item.price * l.qty, 0),
+      cancelled: isCancelOrder,
+      time: new Date().toLocaleTimeString("zh-TW", {hour:"2-digit", minute:"2-digit"}),
+    };
+    setOrders(prev => {
+      const idx = prev.findIndex(o => o.dateStr === orderingDate && o.person.trim() === personName.trim());
+      if (idx >= 0) {
+        const key = `${orderingDate}__${personName.trim()}`;
+        const prevOrder = prev[idx];
+        const histEntry = {
+          time: new Date().toLocaleTimeString("zh-TW", {hour:"2-digit", minute:"2-digit"}),
+          prevLines: prevOrder.lines,
+          prevTotal: prevOrder.total,
+          prevCancelled: prevOrder.cancelled,
+        };
+        setOrderHistory(h => ({ ...h, [key]: [...(h[key]||[]), histEntry] }));
+        const updated = [...prev]; updated[idx] = newOrder;
+        setDupToast(isCancelOrder ? t.dupNote(personName) : t.dupNote(personName));
+        setTimeout(() => setDupToast(""), 2500);
+        return updated;
+      }
+      return [...prev, newOrder];
+    });
+    setCart({}); setPersonName("");
+    if (!isCancelOrder) setShowPayment(true);
+  };
+
+  const tryLogin = () => {
+    if (pwInput === adminPassword) { setIsAdmin(true); setShowAdminLogin(false); setPwInput(""); setPwError(false); setShowPw(false); }
+    else setPwError(true);
+  };
+
+  const saveNewRest = () => {
+    if (!newRest.name) return;
+    setRestaurants(prev => [...prev, { ...newRest, id: Date.now() }]);
+    setNewRest({ name:"", color:"#E67E22", note:"", minDelivery:10, items:[] });
+    setAddingRest(false);
+  };
+  const saveEditRest = () => { setRestaurants(prev => prev.map(r => r.id === editingRest.id ? editingRest : r)); setEditingRest(null); };
+  const deleteRest = id => {
+    setConfirmModal({
+      message: t.deleteConfirm,
+      onConfirm: () => {
+        setRestaurants(prev => prev.filter(r => r.id !== id));
+        setSchedule(prev => { const s = {...prev}; Object.keys(s).forEach(k => { if(s[k]===id) delete s[k]; }); return s; });
+      }
+    });
+  };
+
+  // Scheduled dates with actual restaurant (not NO_ORDER)
+  const scheduledDatesWithOrders = [...new Set(Object.keys(schedule))].filter(ds => schedule[ds] && schedule[ds] !== NO_ORDER_ID).sort();
+
+  // ── Modals (defined inside render, but that's fine — no hooks inside)
+  const AdminLoginModal = () => (
+    <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 px-4"
+      onClick={() => { setShowAdminLogin(false); setPwInput(""); setPwError(false); setShowPw(false); }}>
+      <div className="bg-white rounded-2xl p-6 w-full max-w-xs shadow-2xl" onClick={e => e.stopPropagation()}>
+        <div className="mb-5">
+          <span className="font-bold text-gray-800 text-lg">管理員登入</span>
+        </div>
+        <label className="text-xs text-gray-500 font-medium mb-1 block">密碼</label>
+        <div className="relative mb-1">
+          <input type={showPw ? "text" : "password"} placeholder="請輸入管理員密碼" value={pwInput}
+            onChange={e => { setPwInput(e.target.value); setPwError(false); }}
+            onKeyDown={e => e.key === "Enter" && tryLogin()} autoFocus
+            className="w-full border border-gray-200 rounded-xl px-3 py-2.5 pr-16 text-sm outline-none focus:border-orange-400 transition-colors"/>
+          <button onClick={() => setShowPw(v => !v)} className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-orange-500 font-medium">
+            {showPw ? "隱藏" : "顯示"}
+          </button>
+        </div>
+        {pwError && <p className="text-red-500 text-xs mb-1">密碼錯誤，請再試一次</p>}
+        <button onClick={tryLogin} className="w-full mt-4 py-3 bg-orange-500 text-white rounded-xl font-bold hover:bg-orange-600 transition-colors">登入</button>
+      </div>
+    </div>
+  );
+
+  const ConfirmModal = () => (
+    <Modal onClose={() => setShowConfirm(false)}>
+      <div className="p-5">
+        <h3 className="font-bold text-gray-800 text-base mb-1">{t.confirmTitle}</h3>
+        <p className="text-gray-500 text-sm mb-4">{personName} · {getDayLabel(orderingDate,t)} {formatDate(orderingDate)}</p>
+        <div className="bg-gray-50 rounded-xl p-3 space-y-1.5 mb-4">
+          {Object.entries(cart).map(([id,v]) => {
+            const item = activeRestaurant?.items.find(i => i.id === Number(id)); if (!item) return null;
+            return (
+              <div key={id} className="flex justify-between text-sm">
+                <span className="text-gray-700">{getItemName(item,lang)} ×{v.qty}{v.note && <span className="text-orange-400 text-xs ml-1">· {v.note}</span>}</span>
+                <span className="font-medium text-gray-800">NT${item.price*v.qty}</span>
+              </div>
+            );
+          })}
+          <div className="border-t border-gray-200 pt-2 flex justify-between font-bold text-sm">
+            <span>{t.subtotal}</span>
+            <span style={{color: activeRestaurant?.color}}>NT${cartTotal}</span>
+          </div>
+        </div>
+        <div className="flex gap-2">
+          <button onClick={() => setShowConfirm(false)} className="flex-1 py-2.5 rounded-xl border border-gray-200 text-gray-600 text-sm font-medium hover:bg-gray-50 transition-colors">{t.cancelBtn}</button>
+          <button onClick={confirmOrder} className="flex-1 py-2.5 rounded-xl text-white text-sm font-bold transition-colors hover:opacity-90" style={{background: activeRestaurant?.color||"#E67E22"}}>{t.confirmBtn}</button>
+        </div>
+      </div>
+    </Modal>
+  );
+
+  const PaymentModal = () => (
+    <Modal onClose={() => setShowPayment(false)}>
+      <div className="p-6 text-center">
+        <div className="w-12 h-12 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
+          <svg className="w-6 h-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7"/>
+          </svg>
+        </div>
+        <h3 className="font-bold text-gray-800 text-lg mb-3">{t.paymentTitle}</h3>
+        <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-left space-y-1.5">
+          <p className="text-amber-800 text-sm font-medium">🇹🇼 {LANGS.zh.paymentMsg}</p>
+          <p className="text-amber-700 text-xs">🇮🇩 {LANGS.id.paymentMsg}</p>
+          <p className="text-amber-700 text-xs">🇻🇳 {LANGS.vi.paymentMsg}</p>
+        </div>
+        <button onClick={() => setShowPayment(false)} className="w-full mt-4 py-3 bg-orange-500 text-white rounded-xl font-bold hover:bg-orange-600 transition-colors">{t.paymentClose}</button>
+      </div>
+    </Modal>
+  );
+
+  // ──────────────────────────────────────────
+  // USER VIEW
+  // ──────────────────────────────────────────
+  if (!isAdmin) {
+    const headerColor = activeRestaurant?.color || "#374151";
+    return (
+      <div className="min-h-screen bg-gray-100" style={{fontFamily:"'Noto Sans TC','PingFang TC',sans-serif"}}>
+        {showAdminLogin && <AdminLoginModal/>}
+        {showConfirm && <ConfirmModal/>}
+        {showPayment && <PaymentModal/>}
+
+        {dupToast && (
+          <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 bg-gray-800 text-white text-sm px-4 py-2 rounded-full shadow-lg whitespace-nowrap">{dupToast}</div>
+        )}
+
+        {/* Date selector bar */}
+        <div className="bg-white border-b border-gray-100">
+          <div className="max-w-lg mx-auto px-4 pt-3 pb-0">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs text-gray-400 font-medium">{t.selectDay}</span>
+              <LangSwitcher lang={lang} setLang={setLang}/>
+            </div>
+            {upcomingSlots.length > 0 ? (
+              <div className="flex gap-1.5 overflow-x-auto pb-3">
+                {upcomingSlots.map(({ dateStr, restaurant, noOrder }) => {
+                  const active = dateStr === orderingDate;
+                  const color = noOrder ? "#6B7280" : restaurant?.color || "#6B7280";
+                  return (
+                    <button key={dateStr} onClick={() => switchDate(dateStr)}
+                      className={`shrink-0 flex flex-col items-center px-3 py-2 rounded-xl border transition-all min-w-14 text-center ${active ? "border-current text-white" : "border-gray-100 bg-gray-50 text-gray-500 hover:bg-gray-100"}`}
+                      style={active ? { background: color, borderColor: color } : {}}>
+                      <span className={`text-xs font-bold ${active ? "text-white" : "text-gray-600"}`}>{getDayLabel(dateStr,t)}</span>
+                      <span className={`text-xs ${active ? "text-white/70" : "text-gray-400"}`}>{formatDate(dateStr)}</span>
+                      <span style={{fontSize:"9px", color: active ? "rgba(255,255,255,0.85)" : color, maxWidth:"52px", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", marginTop:"2px"}}>
+                        {noOrder ? t.noOrderLabel : restaurant?.name}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            ) : (
+              <p className="text-xs text-gray-400 pb-3 py-2">{t.noRestaurant}</p>
+            )}
+          </div>
+        </div>
+
+        {/* Restaurant header */}
+        <div style={{background:`linear-gradient(135deg,${headerColor},${headerColor}cc)`}}>
+          <div className="max-w-lg mx-auto px-4 py-3">
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-white font-bold truncate text-sm">{isNoOrder ? t.noOrderToday : (activeRestaurant?.name || t.notSetToday)}</span>
+                <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-white/20 text-white shrink-0">
+                  {getDayLabel(orderingDate,t)} {formatDate(orderingDate)}
+                </span>
+                {!isToday && !isNoOrder && activeRestaurant && (
+                  <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-blue-500/60 text-white shrink-0">{t.advanceBooking}</span>
+                )}
+              </div>
+              {activeRestaurant?.note && <p className="text-white/60 text-xs truncate mt-0.5">{activeRestaurant.note}</p>}
+            </div>
+            {activeRestaurant && !isNoOrder && (
+              <div className="mt-2"><DeadlineBadge ds={orderingDate} t={t}/></div>
+            )}
+          </div>
+        </div>
+
+        <div className="max-w-lg mx-auto px-4 py-4 space-y-3">
+
+          {!activeRestaurantId && (
+            <div className="text-center py-16 text-gray-400">
+              <p className="font-medium">{t.noRestaurant}</p>
+              <p className="text-sm mt-1">{t.waitAdmin}</p>
+            </div>
+          )}
+
+          {isNoOrder && (
+            <div className="bg-white rounded-2xl border border-gray-100 p-8 text-center">
+              <p className="font-bold text-gray-600 text-base mb-1">{t.noOrderToday}</p>
+              <p className="text-gray-400 text-sm">{getDayLabel(orderingDate,t)} {formatDate(orderingDate)}</p>
+            </div>
+          )}
+
+          {activeRestaurant && deadlinePast && (
+            <div className="bg-white rounded-2xl border border-gray-100 p-6 text-center">
+              <p className="text-gray-700 font-bold text-base">{t.closedTitle}</p>
+              <p className="text-gray-400 text-sm mt-1">{t.closedSub}</p>
+            </div>
+          )}
+
+          {activeRestaurant && !deadlinePast && (
+            <div className="space-y-3">
+              {!isToday && (
+                <div className="bg-blue-50 border border-blue-100 rounded-xl px-4 py-2.5 text-sm text-blue-700">
+                  {t.bookingFor(getDayLabel(orderingDate,t), formatDate(orderingDate))} · {t.bookingDeadline}
+                </div>
+              )}
+
+              {/* Name */}
+              <div className="bg-white rounded-2xl border border-gray-100 p-4">
+                <label className="text-xs text-gray-400 font-medium mb-1.5 block">{t.yourName}</label>
+                <input value={personName} onChange={e => setPersonName(e.target.value)} placeholder={t.namePlaceholder}
+                  className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm outline-none focus:border-orange-300 transition-colors"/>
+                <p className="text-xs text-red-500 mt-2 leading-relaxed">{t.nameHint}</p>
+              </div>
+
+              {/* Menu */}
+              <div className="bg-white rounded-2xl border border-gray-100 p-4">
+                <label className="text-xs text-gray-400 font-medium mb-3 block">{t.orderItems}</label>
+
+                {/* Delivery progress bar — only counts main (non-singleOrder) items */}
+                {activeRestaurant.minDelivery > 0 && (() => {
+                  const totalQty = orders
+                    .filter(o => o.dateStr === orderingDate && o.restaurantId === activeRestaurantId && !o.cancelled)
+                    .reduce((sum, o) => sum + o.lines.reduce((s, l) => {
+                      if (l.item.id === CANCEL_ORDER_ID) return s;
+                      // Find the item in the restaurant to check singleOrder flag
+                      const restItem = activeRestaurant.items.find(i => i.id === l.item.id);
+                      if (restItem?.singleOrder) return s;
+                      return s + l.qty;
+                    }, 0), 0);
+                  const min = activeRestaurant.minDelivery;
+                  const pct = Math.min(100, Math.round(totalQty / min * 100));
+                  const met = totalQty >= min;
+                  if (met) {
+                    return (
+                      <div className="mb-3 px-3 py-2 rounded-xl bg-green-50 border border-green-200 flex items-center gap-2">
+                        <div className="w-2 h-2 rounded-full bg-green-500 shrink-0"/>
+                        <span className="text-xs font-bold text-green-700">{t.deliveryMet(min)}</span>
+                      </div>
+                    );
+                  }
+                  return (
+                    <div className="mb-3 p-3 rounded-xl bg-orange-50 border border-orange-100">
+                      <div className="flex items-center justify-between mb-1.5">
+                        <span className="text-xs font-medium text-orange-700">{t.deliveryProgress(totalQty, min)}</span>
+                        <span className="text-xs text-orange-500 font-bold">{t.deliveryShort(min - totalQty)}</span>
+                      </div>
+                      <div className="h-1.5 rounded-full bg-gray-200 overflow-hidden">
+                        <div className="h-full rounded-full transition-all duration-500"
+                          style={{width:`${pct}%`, background: activeRestaurant.color}}/>
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {(() => {
+                  const mainItems = activeRestaurant.items.filter(i => !i.singleOrder);
+                  const singleItems = activeRestaurant.items.filter(i => i.singleOrder);
+
+                  const renderItem = (item) => {
+                    const qty = cart[item.id]?.qty || 0;
+                    const sel = qty > 0;
+                    const noteSlots = cart[item.id]?.notes || [];
+                    return (
+                      <div key={item.id} className={`rounded-xl border transition-all overflow-hidden ${sel ? "" : "border-gray-100 bg-gray-50"}`}
+                        style={sel ? { borderColor: activeRestaurant.color, background: activeRestaurant.color+"0a" } : {}}>
+                        <div className="flex items-center px-3 py-2.5 gap-2">
+                          <div className="flex-1 min-w-0">
+                            <p className="font-medium text-gray-800 text-sm leading-tight">{getItemName(item,lang)}</p>
+                            {lang !== "zh" && <p className="text-gray-400 text-xs">{item.name}</p>}
+                            <p className="text-xs font-bold mt-0.5" style={{color: sel ? activeRestaurant.color : "#9ca3af"}}>
+                              {item.price > 0 ? `NT$${item.price}` : t.inquire}
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            {sel && <button onClick={() => setQty(item.id,-1)} className="w-7 h-7 rounded-full text-white font-bold text-lg flex items-center justify-center" style={{background: activeRestaurant.color}}>−</button>}
+                            {sel && <span className="w-5 text-center font-bold text-sm tabular-nums">{qty}</span>}
+                            <button onClick={() => setQty(item.id,1)} className={`w-7 h-7 rounded-full font-bold text-lg flex items-center justify-center transition-colors ${sel ? "text-white" : "bg-gray-100 text-gray-500 hover:bg-gray-200"}`} style={sel ? {background: activeRestaurant.color} : {}}>+</button>
+                          </div>
+                        </div>
+                        {sel && (
+                          <div className="px-3 pb-2.5 space-y-1.5">
+                            {Array.from({length: qty}, (_, i) => (
+                              <div key={i} className="flex items-center gap-1.5">
+                                {qty > 1 && <span className="text-xs text-gray-400 shrink-0 w-4 text-center">{i+1}</span>}
+                                <input
+                                  value={noteSlots[i] || ""}
+                                  onChange={e => {
+                                    const newNotes = [...(cart[item.id]?.notes || Array(qty).fill(""))];
+                                    newNotes[i] = e.target.value;
+                                    setCart(prev => ({...prev, [item.id]: {...prev[item.id], notes: newNotes}}));
+                                  }}
+                                  placeholder={t.notePlaceholder}
+                                  className="flex-1 text-xs border border-gray-200 rounded-lg px-2.5 py-1.5 outline-none focus:border-orange-300 bg-white"/>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  };
+
+                  return (
+                    <div className="space-y-1.5">
+                      {/* Bento / main items */}
+                      {mainItems.length > 0 && (
+                        <div>
+                          <div className="flex items-center gap-2 mb-2">
+                            <div className="h-px flex-1 bg-gray-100"/>
+                            <span className="text-xs text-gray-400 font-medium px-1">便當 / 正餐</span>
+                            <div className="h-px flex-1 bg-gray-100"/>
+                          </div>
+                          <div className="space-y-1.5">{mainItems.map(renderItem)}</div>
+                        </div>
+                      )}
+
+                      {/* Single-order items */}
+                      {singleItems.length > 0 && (
+                        <div className="mt-3">
+                          <div className="flex items-center gap-2 mb-2">
+                            <div className="h-px flex-1 bg-blue-100"/>
+                            <span className="text-xs text-blue-400 font-medium px-1">單點</span>
+                            <div className="h-px flex-1 bg-blue-100"/>
+                          </div>
+                          <div className="space-y-1.5">{singleItems.map(renderItem)}</div>
+                        </div>
+                      )}
+
+                      {/* Cancel order option */}
+                      <div className="mt-3">
+                        <div className="flex items-center gap-2 mb-2">
+                          <div className="h-px flex-1 bg-gray-100"/>
+                          <span className="text-xs text-gray-300 font-medium px-1">其他</span>
+                          <div className="h-px flex-1 bg-gray-100"/>
+                        </div>
+                        <div className={`rounded-xl border transition-all overflow-hidden ${cart[CANCEL_ORDER_ID] ? "border-red-400 bg-red-50" : "border-dashed border-gray-200 bg-gray-50"}`}>
+                          <div className="flex items-center px-3 py-2.5 gap-2">
+                            <div className="flex-1 min-w-0">
+                              <p className={`font-medium text-sm ${cart[CANCEL_ORDER_ID] ? "text-red-600" : "text-gray-400"}`}>{t.cancelOrderItem}</p>
+                              <p className="text-xs text-gray-400 mt-0.5">{t.cancelOrderNote}</p>
+                            </div>
+                            <button
+                              onClick={() => {
+                                if (cart[CANCEL_ORDER_ID]) { setCart(prev => { const {[CANCEL_ORDER_ID]:_,...rest}=prev; return rest; }); }
+                                else { setCart({ [CANCEL_ORDER_ID]: { qty:1, notes:[] } }); }
+                              }}
+                              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${cart[CANCEL_ORDER_ID] ? "bg-red-500 text-white" : "bg-gray-200 text-gray-500 hover:bg-gray-300"}`}>
+                              {cart[CANCEL_ORDER_ID] ? "✓ 已選擇" : "選擇"}
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })()}
+              </div>
+
+              {/* Cart */}
+              {cartCount > 0 && (
+                <div className="bg-white rounded-2xl border border-gray-100 p-4">
+                  <p className="text-xs text-gray-400 font-medium mb-2">{t.yourOrder}</p>
+                  <div className="space-y-1.5">
+                    {Object.entries(cart).map(([id,v]) => {
+                      const item = activeRestaurant.items.find(i => i.id === Number(id)); if (!item) return null;
+                      return (
+                        <div key={id} className="flex justify-between text-sm">
+                          <span className="text-gray-700 min-w-0 mr-2">{getItemName(item,lang)} <span className="text-gray-400">×{v.qty}</span>{v.note && <span className="text-orange-400 text-xs ml-1">· {v.note}</span>}</span>
+                          <span className="font-bold shrink-0" style={{color: activeRestaurant.color}}>NT${item.price*v.qty}</span>
+                        </div>
+                      );
+                    })}
+                    <div className="border-t border-gray-100 pt-2 flex justify-between font-bold text-sm">
+                      <span className="text-gray-600">{t.subtotal}</span>
+                      <span style={{color: activeRestaurant.color}}>NT${cartTotal}</span>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              <button onClick={() => setShowConfirm(true)} disabled={!personName || (cartCount === 0 && !cart[CANCEL_ORDER_ID])}
+                className={`w-full py-3.5 rounded-xl text-white font-bold shadow-sm disabled:opacity-40 disabled:cursor-not-allowed hover:opacity-90 transition-opacity text-sm ${cart[CANCEL_ORDER_ID] ? "bg-red-500 hover:bg-red-600" : ""}`}
+                style={cart[CANCEL_ORDER_ID] ? {} : {background: activeRestaurant.color}}>
+                {cart[CANCEL_ORDER_ID] ? t.cancelOrderItem : cartCount === 0 ? t.selectFirst : t.submit(cartCount)}
+              </button>
+            </div>
+          )}
+        </div>
+
+        <div className="text-center pb-8">
+          <button onClick={() => setShowAdminLogin(true)} className="text-gray-300 text-xs hover:text-gray-500 transition-colors">管理員入口</button>
+        </div>
+      </div>
+    );
+  }
+
+  // ──────────────────────────────────────────
+  // ADMIN VIEW — always Chinese regardless of user lang
+  // ──────────────────────────────────────────
+  const adminT = LANGS.zh; // fixed Chinese for all admin UI
+  const ConfirmActionModal = () => confirmModal ? (
+    <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 px-4"
+      onClick={() => setConfirmModal(null)}>
+      <div className="bg-gray-900 border border-gray-700 rounded-2xl p-5 w-full max-w-xs shadow-2xl" onClick={e => e.stopPropagation()}>
+        <p className="text-white text-sm font-medium mb-4 text-center leading-relaxed">{confirmModal.message}</p>
+        <div className="flex gap-2">
+          <button onClick={() => setConfirmModal(null)}
+            className="flex-1 py-2.5 rounded-xl border border-gray-700 text-gray-400 text-sm hover:bg-gray-800 transition-colors">
+            取消
+          </button>
+          <button onClick={() => { confirmModal.onConfirm(); setConfirmModal(null); }}
+            className="flex-1 py-2.5 rounded-xl bg-red-600 text-white text-sm font-bold hover:bg-red-700 transition-colors">
+            確認
+          </button>
+        </div>
+      </div>
+    </div>
+  ) : null;
+  return (
+    <div className="min-h-screen bg-gray-950" style={{fontFamily:"'Noto Sans TC','PingFang TC',sans-serif"}}>
+      <ConfirmActionModal/>
+      <div className="bg-gray-900 border-b border-gray-800">
+        <div className="max-w-2xl mx-auto px-4 py-3 flex items-center justify-between gap-2">
+          <span className="text-white font-bold text-sm shrink-0">管理後台</span>
+          <div className="flex items-center gap-2">
+            <button onClick={() => setIsAdmin(false)} className="text-gray-400 hover:text-white text-xs px-3 py-1.5 rounded-lg border border-gray-700 transition-colors whitespace-nowrap">前往點餐頁</button>
+            <button onClick={() => setIsAdmin(false)} className="text-gray-600 hover:text-red-400 text-xs transition-colors whitespace-nowrap">登出</button>
+          </div>
+        </div>
+        <div className="max-w-2xl mx-auto px-4 flex gap-0">
+          {[["schedule","餐廳排程"],["restaurants","餐廳管理"],["orders","訂單總覽"]].map(([key,label]) => (
+            <button key={key} onClick={() => { setAdminSection(key); setEditingRest(null); setAddingRest(false); }}
+              className={`px-5 py-2.5 text-sm font-medium whitespace-nowrap border-b-2 transition-all ${adminSection === key ? "border-orange-500 text-orange-400" : "border-transparent text-gray-500 hover:text-gray-300"}`}>
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="max-w-2xl mx-auto px-4 py-5 space-y-4">
+
+        {/* SCHEDULE — uses separate component, no hooks-in-conditions issue */}
+        {adminSection === "schedule" && (
+          <AdminSchedule schedule={schedule} setSchedule={setSchedule} restaurants={restaurants} orders={orders} t={adminT}/>
+        )}
+
+        {/* RESTAURANTS */}
+        {adminSection === "restaurants" && !editingRest && !addingRest && (
+          <div className="space-y-2">
+            {restaurants.map(r => (
+              <div key={r.id} className="bg-gray-900 border border-gray-800 rounded-xl p-4 flex items-center gap-3">
+                <div className="w-1 h-10 rounded-full shrink-0" style={{background: r.color}}/>
+                <div className="flex-1 min-w-0">
+                  <p className="text-white font-bold text-sm truncate">{r.name}</p>
+                  <p className="text-gray-500 text-xs truncate">{r.items.length} {adminT.dishes} · {r.minDelivery ? `${adminT.minDelivery}: ${r.minDelivery}` : adminT.notArranged}</p>
+                </div>
+                <div className="flex gap-1 shrink-0">
+                  <button onClick={() => setEditingRest({...r, items: r.items.map(i => ({...i}))})} className="text-gray-500 hover:text-orange-400 text-xs px-3 py-1.5 rounded-lg hover:bg-gray-800 transition-colors">{adminT.editBtn}</button>
+                  <button onClick={() => deleteRest(r.id)} className="text-gray-600 hover:text-red-400 text-xs px-3 py-1.5 rounded-lg hover:bg-gray-800 transition-colors">{adminT.deleteBtn}</button>
+                </div>
+              </div>
+            ))}
+            <button onClick={() => setAddingRest(true)} className="w-full py-3 rounded-xl border border-dashed border-gray-700 text-gray-500 hover:text-white hover:border-orange-500/50 transition-all text-sm">{adminT.addRestaurant}</button>
+          </div>
+        )}
+        {adminSection === "restaurants" && addingRest && (
+          <RestaurantForm title={adminT.addTitle} data={newRest} setData={setNewRest} itemInput={newItemInput} setItemInput={setNewItemInput} onSave={saveNewRest} onCancel={() => setAddingRest(false)} t={adminT}/>
+        )}
+        {adminSection === "restaurants" && editingRest && (
+          <RestaurantForm title={adminT.editTitle} data={editingRest} setData={setEditingRest} itemInput={editItemInput} setItemInput={setEditItemInput} onSave={saveEditRest} onCancel={() => setEditingRest(null)} t={adminT}/>
+        )}
+
+        {/* ORDERS */}
+        {adminSection === "orders" && (
+          <div className="space-y-4">
+            {scheduledDatesWithOrders.length > 0 ? (
+              <>
+                <div className="flex gap-1.5 overflow-x-auto pb-1">
+                  {scheduledDatesWithOrders.map(ds => {
+                    const r = restaurants.find(x => x.id === schedule[ds]);
+                    const cnt = orders.filter(o => o.dateStr === ds).length;
+                    const active = adminOrdersDate === ds;
+                    return (
+                      <button key={ds} onClick={() => setAdminOrdersDate(ds)}
+                        className={`shrink-0 flex flex-col items-center px-3 py-2 rounded-xl border transition-all min-w-14 ${active ? "border-current text-white" : "border-gray-800 bg-gray-900 text-gray-400 hover:bg-gray-800"}`}
+                        style={active ? { background: r?.color||"#E67E22", borderColor: r?.color } : {}}>
+                        <span className={`text-xs font-bold ${active ? "text-white" : "text-gray-300"}`}>{getDayLabel(ds, adminT)}</span>
+                        <span className={`text-xs ${active ? "text-white/70" : "text-gray-600"}`}>{formatDate(ds)}</span>
+                        {cnt > 0 && <span className={`text-xs mt-0.5 font-bold ${active ? "text-white" : "text-orange-400"}`}>{cnt}</span>}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {(() => {
+                  const dateOrders = orders.filter(o => o.dateStr === adminOrdersDate);
+                  const r = restaurants.find(x => x.id === schedule[adminOrdersDate]);
+                  const dateTotal = dateOrders.filter(o=>!o.cancelled).reduce((s,o) => s+o.total, 0);
+                  const dateTotalQty = dateOrders.filter(o=>!o.cancelled).reduce((s,o) =>
+                    s + o.lines.reduce((ls,l) => {
+                      if (l.item.id === CANCEL_ORDER_ID) return ls;
+                      const restItem = r?.items?.find(i => i.id === l.item.id);
+                      return restItem?.singleOrder ? ls : ls + l.qty;
+                    }, 0), 0);
+
+                  if (dateOrders.length === 0) return (
+                    <div className="bg-gray-900 border border-gray-800 rounded-xl p-8 text-center text-gray-600 text-sm">{adminT.ordersEmpty}</div>
+                  );
+
+                  const itemMap = {};
+                  dateOrders.forEach(o => {
+                    if (o.cancelled) return;
+                    o.lines.forEach(l => {
+                      if (l.item.id === CANCEL_ORDER_ID) return;
+                      const k = l.item.id;
+                      if (!itemMap[k]) itemMap[k] = { item: l.item, count: 0, noteDetails: [] };
+                      itemMap[k].count += l.qty;
+                      // Collect per-unit notes
+                      const notes = l.notes || (l.note ? [l.note] : []);
+                      notes.forEach((n, i) => {
+                        if (n) itemMap[k].noteDetails.push({ person: o.person, unitIdx: i+1, note: n, totalQty: l.qty });
+                      });
+                    });
+                  });
+
+                  // Sort: active orders first, cancelled last
+                  const sortedOrders = [...dateOrders].sort((a,b) => {
+                    if (a.cancelled && !b.cancelled) return 1;
+                    if (!a.cancelled && b.cancelled) return -1;
+                    return 0;
+                  });
+
+                  return (
+                    <div className="space-y-3">
+                      {/* Single unified card: stats + people + total */}
+                      <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
+                        {/* Header */}
+                        <div className="px-4 py-3 border-b border-gray-800 flex items-center justify-between">
+                          <p className="text-xs text-gray-400 font-medium">
+                            {getDayLabel(adminOrdersDate, adminT)} {r && `· ${r.name}`}
+                          </p>
+                          <div className="flex items-center gap-3">
+                            <span className="text-xs text-gray-500">{dateOrders.filter(o=>!o.cancelled).length} 筆</span>
+                            <span className="text-xs text-orange-300 font-bold">{dateTotalQty} 份</span>
+                            <span className="text-lg font-bold text-white">NT${dateTotal}</span>
+                          </div>
+                        </div>
+
+                        {/* Item summary with notes */}
+                        <div className="px-4 py-2.5 border-b border-gray-800">
+                          <p className="text-xs text-gray-600 mb-2">{adminT.statTitle}</p>
+                          <div className="space-y-2">
+                            {Object.values(itemMap).map(({item, count, noteDetails}) => (
+                              <div key={item.id}>
+                                {/* Main row: item name + total count */}
+                                <div className="flex items-center gap-1.5">
+                                  <span className="text-white text-sm font-medium">{getItemName(item, "zh")}</span>
+                                  <span className="bg-orange-500 text-white text-xs font-bold px-1.5 py-0.5 rounded-full leading-none">×{count}</span>
+                                  {item.singleOrder && <span className="text-blue-400 text-xs border border-blue-700 px-1 rounded leading-none">單點</span>}
+                                </div>
+                                {/* Per-unit notes — clearly subordinate */}
+                                {noteDetails.length > 0 && (
+                                  <div className="mt-1 ml-3 space-y-0.5 border-l-2 border-gray-700 pl-2">
+                                    {noteDetails.map((nd,i) => (
+                                      <div key={i} className="flex items-baseline gap-1">
+                                        <span className="text-gray-500 text-xs shrink-0">
+                                          {nd.person}{nd.totalQty > 1 ? ` 第${nd.unitIdx}份` : ""}：
+                                        </span>
+                                        <span className="text-amber-300 text-xs">{nd.note}</span>
+                                        <span className="text-gray-600 text-xs shrink-0">×1</span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+
+                        {/* Per-person rows */}
+                        <div className="divide-y divide-gray-800">
+                          {sortedOrders.map(o => {
+                            const histKey = `${adminOrdersDate}__${o.person.trim()}`;
+                            const hist = orderHistory[histKey];
+                            return (
+                              <div key={o.id} className={`px-4 py-2.5 ${o.cancelled ? "opacity-60" : ""}`}>
+                                <div className="flex items-center justify-between mb-1">
+                                  <div className="flex items-center gap-1.5 min-w-0">
+                                    <div className="w-5 h-5 rounded-full flex items-center justify-center text-white text-xs font-bold shrink-0"
+                                      style={{background: o.cancelled ? "#6B7280" : (r?.color||"#E67E22"), fontSize:"10px"}}>{o.person[0]}</div>
+                                    <span className={`text-xs font-bold truncate ${o.cancelled ? "line-through text-gray-500" : "text-white"}`}>{o.person}</span>
+                                    <span className="text-gray-600 text-xs shrink-0">{o.time}</span>
+                                    {o.cancelled && <span className="text-red-400 text-xs shrink-0 font-medium">{adminT.cancelledLabel}</span>}
+                                    {hist && !o.cancelled && <span className="text-amber-400 text-xs shrink-0 font-medium">{adminT.editedLabel}</span>}
+                                  </div>
+                                  <div className="flex items-center gap-2 shrink-0">
+                                    {!o.cancelled && <span className="text-orange-400 font-bold text-xs">NT${o.total}</span>}
+                                    <button onClick={() => setConfirmModal({ message: adminT.confirmDeleteOrder(o.person), onConfirm: () => setOrders(prev => prev.filter(x => x.id !== o.id)) })} className="text-gray-700 hover:text-red-400 text-base leading-none w-4 text-center">×</button>
+                                  </div>
+                                </div>
+                                <p className={`text-xs pl-6 leading-relaxed ${o.cancelled ? "text-red-400/70 line-through" : "text-gray-500"}`}>
+                                  {o.cancelled ? adminT.cancelOrderItem : o.lines.map((l,i) => {
+                                    const notes = l.notes || (l.note ? [l.note] : []);
+                                    const hasNotes = notes.some(n => n);
+                                    return (
+                                      <span key={i}>
+                                        {i>0?"、":""}{getItemName(l.item, "zh")} ×{l.qty}
+                                        {hasNotes && notes.map((n,j) => n ? (
+                                          <span key={j} className="text-amber-400 font-medium"> [{l.qty>1?`${j+1}.`:""}{n}]</span>
+                                        ) : null)}
+                                      </span>
+                                    );
+                                  })}
+                                </p>
+                                {hist && (
+                                  <div className="pl-6 mt-1.5 space-y-1">
+                                    <p className="text-amber-500/70 text-xs">{adminT.editHistory}:</p>
+                                    {hist.map((h,i) => (
+                                      <div key={i} className="text-gray-600 text-xs pl-2 border-l border-gray-700">
+                                        <span className="text-gray-500 mr-1">{h.time}:</span>
+                                        {h.prevCancelled ? <span className="text-red-400/60">{adminT.cancelOrderItem}</span>
+                                          : h.prevLines?.map((l,j) => (
+                                            <span key={j}>{j>0?"、":""}{getItemName(l.item, "zh")} ×{l.qty}</span>
+                                          ))}
+                                        {!h.prevCancelled && <span className="text-gray-600 ml-1">(NT${h.prevTotal})</span>}
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      <button onClick={() => setConfirmModal({ message: adminT.confirmClear(getDayLabel(adminOrdersDate, adminT)), onConfirm: () => setOrders(prev => prev.filter(o => o.dateStr !== adminOrdersDate)) })}
+                        className="w-full py-2.5 rounded-xl border border-red-900/50 text-red-500 text-sm hover:bg-red-900/20 transition-colors">
+                        {adminT.clearDay}
+                      </button>
+                    </div>
+                  );
+                })()}
+              </>
+            ) : (
+              <div className="bg-gray-900 border border-gray-800 rounded-xl p-8 text-center text-gray-600 text-sm">{adminT.noScheduleYet}</div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+
+const root = ReactDOM.createRoot(document.getElementById('root'));
+root.render(React.createElement(App));
+  </script>
+</body>
+</html>
