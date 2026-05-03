@@ -935,6 +935,27 @@ function App() {
     window._fbDb.collection("appdata").doc(docId).set({ value }).catch(() => {});
   };
 
+  // Auto-cleanup: when orders load, delete orders whose date is past deadline
+  useEffect(() => {
+    if (!loaded) return;
+    const cutoff = todayStr(); // orders before today's date get pruned
+    setOrders(prev => {
+      const cleaned = prev.filter(o => o.dateStr >= cutoff);
+      // Also clean matching orderHistory keys
+      if (cleaned.length !== prev.length) {
+        setOrderHistory(h => {
+          const newH = {...h};
+          prev.filter(o => o.dateStr < cutoff).forEach(o => {
+            const key = `${o.dateStr}__${o.person.trim()}`;
+            delete newH[key];
+          });
+          return newH;
+        });
+      }
+      return cleaned;
+    });
+  }, [loaded]);
+
   // Wrapped setters — update local state + write to Firestore
   const setRestaurants = useCallback((updater) => {
     setRestaurantsState(prev => {
@@ -1561,181 +1582,196 @@ function App() {
         )}
 
         {/* ORDERS */}
-        {adminSection === "orders" && (
+        {adminSection === "orders" && (() => {
+          // Show today + next 6 days always, plus any day with orders
+          const todayD = todayStr();
+          const week7 = Array.from({length:7}, (_,i) => {
+            const d = new Date(); d.setDate(d.getDate()+i); return makeDateStr(d);
+          });
+          const orderDates = [...new Set(orders.map(o => o.dateStr))];
+          const allDates = [...new Set([...week7, ...orderDates])].filter(ds => ds >= todayD).sort();
+          const activeDateFinal = allDates.includes(adminOrdersDate) ? adminOrdersDate : (allDates[0] ?? todayD);
+
+          const dateOrders = orders.filter(o => o.dateStr === activeDateFinal);
+          const r = restaurants.find(x => x.id === schedule[activeDateFinal]);
+          const hasSchedule = !!schedule[activeDateFinal] && schedule[activeDateFinal] !== NO_ORDER_ID;
+          const dateTotal = dateOrders.filter(o=>!o.cancelled).reduce((s,o)=>s+o.total,0);
+          const dateTotalQty = dateOrders.filter(o=>!o.cancelled).reduce((s,o)=>
+            s + o.lines.reduce((ls,l)=>{
+              if(l.item.id===CANCEL_ORDER_ID) return ls;
+              const ri=r?.items?.find(i=>i.id===l.item.id);
+              return ri?.singleOrder ? ls : ls+l.qty;
+            },0),0);
+
+          const itemMap = {};
+          dateOrders.forEach(o => {
+            if(o.cancelled) return;
+            o.lines.forEach(l => {
+              if(l.item.id===CANCEL_ORDER_ID) return;
+              const k=l.item.id;
+              if(!itemMap[k]) itemMap[k]={item:l.item,count:0,noteDetails:[]};
+              itemMap[k].count+=l.qty;
+              const notes=l.notes||(l.note?[l.note]:[]);
+              notes.forEach((n,i)=>{ if(n) itemMap[k].noteDetails.push({person:o.person,unitIdx:i+1,note:n,totalQty:l.qty}); });
+            });
+          });
+
+          const sortedOrders=[...dateOrders].sort((a,b)=>{
+            if(a.cancelled&&!b.cancelled) return 1;
+            if(!a.cancelled&&b.cancelled) return -1;
+            return 0;
+          });
+
+          return (
           <div className="space-y-4">
-            {scheduledDatesWithOrders.length > 0 ? (
-              <>
-                <div className="flex gap-1.5 overflow-x-auto pb-1">
-                  {scheduledDatesWithOrders.map(ds => {
-                    const r = restaurants.find(x => x.id === schedule[ds]);
-                    const cnt = orders.filter(o => o.dateStr === ds).length;
-                    const active = adminOrdersDate === ds;
-                    return (
-                      <button key={ds} onClick={() => setAdminOrdersDate(ds)}
-                        className={`shrink-0 flex flex-col items-center px-3 py-2 rounded-xl border transition-all min-w-14 ${active ? "border-current text-white" : "border-gray-800 bg-gray-900 text-gray-400 hover:bg-gray-800"}`}
-                        style={active ? { background: r?.color||"#E67E22", borderColor: r?.color } : {}}>
-                        <span className={`text-xs font-bold ${active ? "text-white" : "text-gray-300"}`}>{getDayLabel(ds, adminT)}</span>
-                        <span className={`text-xs ${active ? "text-white/70" : "text-gray-600"}`}>{formatDate(ds)}</span>
-                        {cnt > 0 && <span className={`text-xs mt-0.5 font-bold ${active ? "text-white" : "text-orange-400"}`}>{cnt}</span>}
-                      </button>
-                    );
-                  })}
+            {/* Date tabs — always 7 days */}
+            <div className="flex gap-1.5 overflow-x-auto pb-1">
+              {allDates.map(ds => {
+                const rr = restaurants.find(x=>x.id===schedule[ds]);
+                const cnt = orders.filter(o=>o.dateStr===ds).length;
+                const active = activeDateFinal===ds;
+                const hasSch = !!schedule[ds] && schedule[ds]!==NO_ORDER_ID;
+                return (
+                  <button key={ds} onClick={()=>setAdminOrdersDate(ds)}
+                    className={`shrink-0 flex flex-col items-center px-3 py-2 rounded-xl border transition-all min-w-14 ${active?"border-current text-white":"border-gray-800 bg-gray-900 text-gray-400 hover:bg-gray-800"}`}
+                    style={active?{background:hasSch?rr?.color||"#E67E22":"#4B5563",borderColor:hasSch?rr?.color:"#4B5563"}:{}}>
+                    <span className={`text-xs font-bold ${active?"text-white":"text-gray-300"}`}>{getDayLabel(ds,adminT)}</span>
+                    <span className={`text-xs ${active?"text-white/70":"text-gray-600"}`}>{formatDate(ds)}</span>
+                    {cnt>0&&<span className={`text-xs mt-0.5 font-bold ${active?"text-white":"text-orange-400"}`}>{cnt}</span>}
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* No schedule placeholder */}
+            {!hasSchedule && dateOrders.length===0 && (
+              <div className="bg-orange-900/20 border border-orange-800/40 rounded-xl p-5 text-center">
+                <p className="text-orange-300 text-sm font-medium">後台小編正在努力找尋適合的午餐供大家選擇喔！</p>
+                <p className="text-orange-400/60 text-xs mt-1">{getDayLabel(activeDateFinal,adminT)} {formatDate(activeDateFinal)}</p>
+              </div>
+            )}
+
+            {/* No orders yet */}
+            {dateOrders.length===0 && hasSchedule && (
+              <div className="bg-gray-900 border border-gray-800 rounded-xl p-8 text-center text-gray-600 text-sm">{adminT.ordersEmpty}</div>
+            )}
+
+            {/* Orders card */}
+            {dateOrders.length>0 && (
+              <div className="space-y-3">
+                <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
+                  {/* Header */}
+                  <div className="px-4 py-3 border-b border-gray-800 flex items-center justify-between">
+                    <p className="text-xs text-gray-400 font-medium">{getDayLabel(activeDateFinal,adminT)} {r&&`· ${r.name}`}</p>
+                    <div className="flex items-center gap-3">
+                      <span className="text-xs text-gray-500">{dateOrders.filter(o=>!o.cancelled).length} 筆</span>
+                      <span className="text-xs text-orange-300 font-bold">{dateTotalQty} 份</span>
+                      <span className="text-lg font-bold text-white">NT${dateTotal}</span>
+                    </div>
+                  </div>
+
+                  {/* Item stats */}
+                  {Object.keys(itemMap).length>0 && (
+                    <div className="px-4 py-2.5 border-b border-gray-800">
+                      <p className="text-xs text-gray-600 mb-2">{adminT.statTitle}</p>
+                      <div className="space-y-2">
+                        {Object.values(itemMap).map(({item,count,noteDetails})=>(
+                          <div key={item.id}>
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-white text-sm font-medium">{getItemName(item,"zh")}</span>
+                              <span className="bg-orange-500 text-white text-xs font-bold px-1.5 py-0.5 rounded-full leading-none">×{count}</span>
+                              {item.singleOrder&&<span className="text-blue-400 text-xs border border-blue-700 px-1 rounded leading-none">單點</span>}
+                            </div>
+                            {noteDetails.length>0&&(
+                              <div className="mt-1 ml-3 space-y-0.5 border-l-2 border-gray-700 pl-2">
+                                {noteDetails.map((nd,i)=>(
+                                  <div key={i} className="flex items-baseline gap-1">
+                                    <span className="text-gray-500 text-xs shrink-0">{nd.person}{nd.totalQty>1?` 第${nd.unitIdx}份`:""}：</span>
+                                    <span className="text-amber-300 text-xs">{nd.note}</span>
+                                    <span className="text-gray-600 text-xs shrink-0">×1</span>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Per-person rows */}
+                  <div className="divide-y divide-gray-800">
+                    {sortedOrders.map(o=>{
+                      const histKey=`${activeDateFinal}__${o.person.trim()}`;
+                      const hist=orderHistory[histKey];
+                      return (
+                        <div key={o.id} className={`px-4 py-2.5 ${o.cancelled?"opacity-60":""}`}>
+                          <div className="flex items-center justify-between mb-1">
+                            <div className="flex items-center gap-1.5 min-w-0">
+                              <div className="w-5 h-5 rounded-full flex items-center justify-center text-white text-xs font-bold shrink-0"
+                                style={{background:o.cancelled?"#6B7280":(r?.color||"#E67E22"),fontSize:"10px"}}>{o.person[0]}</div>
+                              <span className={`text-xs font-bold truncate ${o.cancelled?"line-through text-gray-500":"text-white"}`}>{o.person}</span>
+                              <span className="text-gray-600 text-xs shrink-0">{o.time}</span>
+                              {o.cancelled&&<span className="text-red-400 text-xs shrink-0 font-medium">{adminT.cancelledLabel}</span>}
+                              {hist&&!o.cancelled&&<span className="text-amber-400 text-xs shrink-0 font-medium">{adminT.editedLabel}</span>}
+                              {o.paid&&<span className="text-green-400 text-xs shrink-0 font-bold">✓ 已收款</span>}
+                            </div>
+                            <div className="flex items-center gap-1.5 shrink-0">
+                              {!o.cancelled&&<span className="text-orange-400 font-bold text-xs">NT${o.total}</span>}
+                              {!o.cancelled&&!o.paid&&(
+                                <button onClick={()=>setOrders(prev=>prev.map(x=>x.id===o.id?{...x,paid:true}:x))}
+                                  className="text-xs px-2 py-0.5 rounded-lg bg-green-900/50 text-green-400 border border-green-800 hover:bg-green-800/60 transition-colors whitespace-nowrap">
+                                  收款
+                                </button>
+                              )}
+                              <button onClick={()=>setConfirmModal({message:adminT.confirmDeleteOrder(o.person),onConfirm:()=>setOrders(prev=>prev.filter(x=>x.id!==o.id))})}
+                                className="text-gray-700 hover:text-red-400 text-base leading-none w-4 text-center">×</button>
+                            </div>
+                          </div>
+                          <p className={`text-xs pl-6 leading-relaxed ${o.cancelled?"text-red-400/70 line-through":"text-gray-500"}`}>
+                            {o.cancelled?adminT.cancelOrderItem:o.lines.map((l,i)=>{
+                              const notes=l.notes||(l.note?[l.note]:[]);
+                              const hasNotes=notes.some(n=>n);
+                              return(
+                                <span key={i}>
+                                  {i>0?"、":""}{getItemName(l.item,"zh")} ×{l.qty}
+                                  {hasNotes&&notes.map((n,j)=>n?(
+                                    <span key={j} className="text-amber-400 font-medium"> [{l.qty>1?`${j+1}.`:""}{n}]</span>
+                                  ):null)}
+                                </span>
+                              );
+                            })}
+                          </p>
+                          {hist&&(
+                            <div className="pl-6 mt-1.5 space-y-1">
+                              <p className="text-amber-500/70 text-xs">{adminT.editHistory}:</p>
+                              {hist.map((h,i)=>(
+                                <div key={i} className="text-gray-600 text-xs pl-2 border-l border-gray-700">
+                                  <span className="text-gray-500 mr-1">{h.time}:</span>
+                                  {h.prevCancelled?<span className="text-red-400/60">{adminT.cancelOrderItem}</span>
+                                    :h.prevLines?.map((l,j)=>(
+                                      <span key={j}>{j>0?"、":""}{getItemName(l.item,"zh")} ×{l.qty}</span>
+                                    ))}
+                                  {!h.prevCancelled&&<span className="text-gray-600 ml-1">(NT${h.prevTotal})</span>}
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
 
-                {(() => {
-                  const dateOrders = orders.filter(o => o.dateStr === adminOrdersDate);
-                  const r = restaurants.find(x => x.id === schedule[adminOrdersDate]);
-                  const dateTotal = dateOrders.filter(o=>!o.cancelled).reduce((s,o) => s+o.total, 0);
-                  const dateTotalQty = dateOrders.filter(o=>!o.cancelled).reduce((s,o) =>
-                    s + o.lines.reduce((ls,l) => {
-                      if (l.item.id === CANCEL_ORDER_ID) return ls;
-                      const restItem = r?.items?.find(i => i.id === l.item.id);
-                      return restItem?.singleOrder ? ls : ls + l.qty;
-                    }, 0), 0);
-
-                  if (dateOrders.length === 0) return (
-                    <div className="bg-gray-900 border border-gray-800 rounded-xl p-8 text-center text-gray-600 text-sm">{adminT.ordersEmpty}</div>
-                  );
-
-                  const itemMap = {};
-                  dateOrders.forEach(o => {
-                    if (o.cancelled) return;
-                    o.lines.forEach(l => {
-                      if (l.item.id === CANCEL_ORDER_ID) return;
-                      const k = l.item.id;
-                      if (!itemMap[k]) itemMap[k] = { item: l.item, count: 0, noteDetails: [] };
-                      itemMap[k].count += l.qty;
-                      // Collect per-unit notes
-                      const notes = l.notes || (l.note ? [l.note] : []);
-                      notes.forEach((n, i) => {
-                        if (n) itemMap[k].noteDetails.push({ person: o.person, unitIdx: i+1, note: n, totalQty: l.qty });
-                      });
-                    });
-                  });
-
-                  // Sort: active orders first, cancelled last
-                  const sortedOrders = [...dateOrders].sort((a,b) => {
-                    if (a.cancelled && !b.cancelled) return 1;
-                    if (!a.cancelled && b.cancelled) return -1;
-                    return 0;
-                  });
-
-                  return (
-                    <div className="space-y-3">
-                      {/* Single unified card: stats + people + total */}
-                      <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
-                        {/* Header */}
-                        <div className="px-4 py-3 border-b border-gray-800 flex items-center justify-between">
-                          <p className="text-xs text-gray-400 font-medium">
-                            {getDayLabel(adminOrdersDate, adminT)} {r && `· ${r.name}`}
-                          </p>
-                          <div className="flex items-center gap-3">
-                            <span className="text-xs text-gray-500">{dateOrders.filter(o=>!o.cancelled).length} 筆</span>
-                            <span className="text-xs text-orange-300 font-bold">{dateTotalQty} 份</span>
-                            <span className="text-lg font-bold text-white">NT${dateTotal}</span>
-                          </div>
-                        </div>
-
-                        {/* Item summary with notes */}
-                        <div className="px-4 py-2.5 border-b border-gray-800">
-                          <p className="text-xs text-gray-600 mb-2">{adminT.statTitle}</p>
-                          <div className="space-y-2">
-                            {Object.values(itemMap).map(({item, count, noteDetails}) => (
-                              <div key={item.id}>
-                                {/* Main row: item name + total count */}
-                                <div className="flex items-center gap-1.5">
-                                  <span className="text-white text-sm font-medium">{getItemName(item, "zh")}</span>
-                                  <span className="bg-orange-500 text-white text-xs font-bold px-1.5 py-0.5 rounded-full leading-none">×{count}</span>
-                                  {item.singleOrder && <span className="text-blue-400 text-xs border border-blue-700 px-1 rounded leading-none">單點</span>}
-                                </div>
-                                {/* Per-unit notes — clearly subordinate */}
-                                {noteDetails.length > 0 && (
-                                  <div className="mt-1 ml-3 space-y-0.5 border-l-2 border-gray-700 pl-2">
-                                    {noteDetails.map((nd,i) => (
-                                      <div key={i} className="flex items-baseline gap-1">
-                                        <span className="text-gray-500 text-xs shrink-0">
-                                          {nd.person}{nd.totalQty > 1 ? ` 第${nd.unitIdx}份` : ""}：
-                                        </span>
-                                        <span className="text-amber-300 text-xs">{nd.note}</span>
-                                        <span className="text-gray-600 text-xs shrink-0">×1</span>
-                                      </div>
-                                    ))}
-                                  </div>
-                                )}
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-
-                        {/* Per-person rows */}
-                        <div className="divide-y divide-gray-800">
-                          {sortedOrders.map(o => {
-                            const histKey = `${adminOrdersDate}__${o.person.trim()}`;
-                            const hist = orderHistory[histKey];
-                            return (
-                              <div key={o.id} className={`px-4 py-2.5 ${o.cancelled ? "opacity-60" : ""}`}>
-                                <div className="flex items-center justify-between mb-1">
-                                  <div className="flex items-center gap-1.5 min-w-0">
-                                    <div className="w-5 h-5 rounded-full flex items-center justify-center text-white text-xs font-bold shrink-0"
-                                      style={{background: o.cancelled ? "#6B7280" : (r?.color||"#E67E22"), fontSize:"10px"}}>{o.person[0]}</div>
-                                    <span className={`text-xs font-bold truncate ${o.cancelled ? "line-through text-gray-500" : "text-white"}`}>{o.person}</span>
-                                    <span className="text-gray-600 text-xs shrink-0">{o.time}</span>
-                                    {o.cancelled && <span className="text-red-400 text-xs shrink-0 font-medium">{adminT.cancelledLabel}</span>}
-                                    {hist && !o.cancelled && <span className="text-amber-400 text-xs shrink-0 font-medium">{adminT.editedLabel}</span>}
-                                  </div>
-                                  <div className="flex items-center gap-2 shrink-0">
-                                    {!o.cancelled && <span className="text-orange-400 font-bold text-xs">NT${o.total}</span>}
-                                    <button onClick={() => setConfirmModal({ message: adminT.confirmDeleteOrder(o.person), onConfirm: () => setOrders(prev => prev.filter(x => x.id !== o.id)) })} className="text-gray-700 hover:text-red-400 text-base leading-none w-4 text-center">×</button>
-                                  </div>
-                                </div>
-                                <p className={`text-xs pl-6 leading-relaxed ${o.cancelled ? "text-red-400/70 line-through" : "text-gray-500"}`}>
-                                  {o.cancelled ? adminT.cancelOrderItem : o.lines.map((l,i) => {
-                                    const notes = l.notes || (l.note ? [l.note] : []);
-                                    const hasNotes = notes.some(n => n);
-                                    return (
-                                      <span key={i}>
-                                        {i>0?"、":""}{getItemName(l.item, "zh")} ×{l.qty}
-                                        {hasNotes && notes.map((n,j) => n ? (
-                                          <span key={j} className="text-amber-400 font-medium"> [{l.qty>1?`${j+1}.`:""}{n}]</span>
-                                        ) : null)}
-                                      </span>
-                                    );
-                                  })}
-                                </p>
-                                {hist && (
-                                  <div className="pl-6 mt-1.5 space-y-1">
-                                    <p className="text-amber-500/70 text-xs">{adminT.editHistory}:</p>
-                                    {hist.map((h,i) => (
-                                      <div key={i} className="text-gray-600 text-xs pl-2 border-l border-gray-700">
-                                        <span className="text-gray-500 mr-1">{h.time}:</span>
-                                        {h.prevCancelled ? <span className="text-red-400/60">{adminT.cancelOrderItem}</span>
-                                          : h.prevLines?.map((l,j) => (
-                                            <span key={j}>{j>0?"、":""}{getItemName(l.item, "zh")} ×{l.qty}</span>
-                                          ))}
-                                        {!h.prevCancelled && <span className="text-gray-600 ml-1">(NT${h.prevTotal})</span>}
-                                      </div>
-                                    ))}
-                                  </div>
-                                )}
-                              </div>
-                            );
-                          })}
-                        </div>
-                      </div>
-
-                      <button onClick={() => setConfirmModal({ message: adminT.confirmClear(getDayLabel(adminOrdersDate, adminT)), onConfirm: () => setOrders(prev => prev.filter(o => o.dateStr !== adminOrdersDate)) })}
-                        className="w-full py-2.5 rounded-xl border border-red-900/50 text-red-500 text-sm hover:bg-red-900/20 transition-colors">
-                        {adminT.clearDay}
-                      </button>
-                    </div>
-                  );
-                })()}
-              </>
-            ) : (
-              <div className="bg-gray-900 border border-gray-800 rounded-xl p-8 text-center text-gray-600 text-sm">{adminT.noScheduleYet}</div>
+                <button onClick={()=>setConfirmModal({message:adminT.confirmClear(getDayLabel(activeDateFinal,adminT)),onConfirm:()=>setOrders(prev=>prev.filter(o=>o.dateStr!==activeDateFinal))})}
+                  className="w-full py-2.5 rounded-xl border border-red-900/50 text-red-500 text-sm hover:bg-red-900/20 transition-colors">
+                  {adminT.clearDay}
+                </button>
+              </div>
             )}
           </div>
-        )}
+          );
+        })()}
       </div>
     </div>
   );
